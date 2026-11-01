@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>WinPreviewPlus.Setup</RootNamespace>
+    <AssemblyName>WinPreviewPlus-Setup</AssemblyName>
+    <ApplicationIcon />
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <Deterministic>true</Deterministic>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <Product>WinPreviewPlus</Product>
+    <AssemblyTitle>WinPreviewPlus Setup</AssemblyTitle>
+    <Version>1.0.0</Version>
+    <Company>WinPreviewPlus</Company>
+    <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Создаётся packaging\Build-WinPreviewPlus.ps1 перед сборкой Setup -->
+    <EmbeddedResource Include="payload.zip" Condition="Exists('payload.zip')" />
+  </ItemGroup>
+</Project>

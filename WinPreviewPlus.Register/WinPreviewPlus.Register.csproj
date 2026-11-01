@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <RootNamespace>WinPreviewPlus.Register</RootNamespace>
+    <AssemblyName>WinPreviewPlus.Register</AssemblyName>
+    <Product>WinPreviewPlus</Product>
+    <Company>WinPreviewPlus</Company>
+    <AssemblyTitle>WinPreviewPlus Register</AssemblyTitle>
+    <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\WinPreviewPlus\WinPreviewPlus.csproj" />
+    <PackageReference Include="SharpShell" Version="2.7.2" />
+  </ItemGroup>
+</Project>

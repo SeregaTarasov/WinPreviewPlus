@@ -1,0 +1,22 @@
+## Build
+**/bin/
+**/obj/
+**/out/
+*.user
+*.suo
+*.cache
+.vs/
+
+## Packaging artifacts (release attaches Setup separately)
+dist/
+WinPreviewPlus.Setup/payload.zip
+packaging/stage/
+
+## Logs / local
+*.log
+*.pdb
+
+## OS
+Thumbs.db
+Desktop.ini
+.DS_Store
