@@ -19,7 +19,7 @@ namespace WinPreviewPlus.Setup
     internal static class Installer
     {
         public const string ProductName = "WinPreviewPlus";
-        public const string Version = "1.0.0";
+        public const string Version = "1.1.0";
 
         public static readonly string InstallRoot = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -672,7 +672,7 @@ namespace WinPreviewPlus.Setup
             var extMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var e in new[] { ".zip", ".7z", ".rar", ".tar", ".tgz", ".gz", ".bz2", ".xz" })
                 extMap[e] = Arch;
-            foreach (var e in new[] { ".docx", ".xlsx", ".pptx" })
+            foreach (var e in new[] { ".docx", ".xlsx", ".xls", ".pptx" })
                 extMap[e] = Off;
             extMap[".pdf"] = Pdf;
             foreach (var e in new[]
@@ -728,7 +728,9 @@ namespace WinPreviewPlus.Setup
                 ["ASC.Document.12"] = Off,
                 ["ASC.Presentation.12"] = Off,
                 ["ASC.Sheet.1"] = Off,
-                ["ASC.Document.1"] = Off
+                ["ASC.Document.1"] = Off,
+                ["Excel.Sheet.8"] = Off,
+                ["Excel.Sheet.12"] = Off
             })
             {
                 SetShellex(@"Software\Classes\" + kv.Key + @"\shellex\" + PreviewGuid, kv.Value);

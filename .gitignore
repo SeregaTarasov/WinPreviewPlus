@@ -20,3 +20,5 @@ packaging/stage/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+samples/**/_payload/

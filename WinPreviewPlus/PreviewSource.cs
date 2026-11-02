@@ -202,6 +202,10 @@ namespace WinPreviewPlus
                         return ".zip";
                     }
 
+                    // OLE Compound Document — .xls/.doc/.ppt; без разбора хранилища не отличить
+                    if (sig[0] == 0xD0 && sig[1] == 0xCF && sig[2] == 0x11 && sig[3] == 0xE0)
+                        return null;
+
                     if (sig[0] == 0x37 && sig[1] == 0x7A && sig[2] == 0xBC && sig[3] == 0xAF)
                         return ".7z";
                     if (sig[0] == 0x52 && sig[1] == 0x61 && sig[2] == 0x72 && sig[3] == 0x21)

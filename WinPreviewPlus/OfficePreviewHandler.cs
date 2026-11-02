@@ -12,6 +12,7 @@ namespace WinPreviewPlus
     [PreviewHandler(DisableLowILProcessIsolation = true)]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".docx")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".xlsx")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".xls")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".pptx")]
     [DisplayName("WinPreviewPlus Office")]
     public class OfficePreviewHandler : SharpPreviewHandler, IInitializeWithFile, IPreviewHandler

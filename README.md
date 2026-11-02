@@ -7,7 +7,7 @@
 | Тип | Примеры |
 |-----|---------|
 | Архивы | zip, 7z, rar, tar, gz… |
-| Office | docx, xlsx, pptx |
+| Office | docx, xlsx, **xls**, pptx |
 | PDF | поиск по тексту, масштаб |
 | Текст / код | txt, md, json, xml, ps1, cs… |
 | Фото | jpg, png, webp, heic, **svg**… |

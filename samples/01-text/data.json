@@ -1,0 +1,11 @@
+{
+  "product": "WinPreviewPlus",
+  "find": "ПРОБНИК-НАЙТИ-123",
+  "formats": [
+    "txt",
+    "md",
+    "json",
+    "csv",
+    "xml"
+  ]
+}

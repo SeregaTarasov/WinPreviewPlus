@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0a1628"/>
+      <stop offset="100%" stop-color="#0067c0"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="500" fill="url(#g)"/>
+  <circle cx="400" cy="220" r="90" fill="none" stroke="#7dd3fc" stroke-width="8"/>
+  <text x="400" y="360" text-anchor="middle" fill="white"
+        font-family="Segoe UI, Arial" font-size="42" font-weight="700">WinPreviewPlus</text>
+  <text x="400" y="410" text-anchor="middle" fill="#bae6fd"
+        font-family="Segoe UI, Arial" font-size="22">SVG preview (WebView2)</text>
+</svg>

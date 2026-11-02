@@ -20,7 +20,7 @@ $handlers = @(
   },
   @{
     Id = '{B7E4A902-2C5D-4F8A-9E31-11A0C3D5E702}'
-    Exts = @('.docx', '.xlsx', '.pptx')
+    Exts = @('.docx', '.xlsx', '.xls', '.pptx')
   },
   @{
     Id = '{B7E4A903-2C5D-4F8A-9E31-11A0C3D5E703}'

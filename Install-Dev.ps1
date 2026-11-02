@@ -80,6 +80,8 @@ $progMap = @{
   'ASC.Presentation.12' = $off
   'ASC.Sheet.1' = $off
   'ASC.Document.1' = $off
+  'Excel.Sheet.8' = $off
+  'Excel.Sheet.12' = $off
 }
 foreach ($kv in $progMap.GetEnumerator()) {
   $shellex = "HKCU:\Software\Classes\$($kv.Key)\shellex\$PreviewGuid"
@@ -91,7 +93,7 @@ foreach ($kv in $progMap.GetEnumerator()) {
 $extMap = @{
   '.zip' = $arch; '.7z' = $arch; '.rar' = $arch; '.tar' = $arch
   '.tgz' = $arch; '.gz' = $arch; '.bz2' = $arch; '.xz' = $arch
-  '.docx' = $off; '.xlsx' = $off; '.pptx' = $off
+  '.docx' = $off; '.xlsx' = $off; '.xls' = $off; '.pptx' = $off
   '.pdf' = $pdf
   '.txt' = $txt; '.log' = $txt; '.md' = $txt; '.csv' = $txt; '.tsv' = $txt
   '.json' = $txt; '.geojson' = $txt; '.jsonl' = $txt; '.ndjson' = $txt

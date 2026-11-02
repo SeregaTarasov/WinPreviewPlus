@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -10,6 +11,7 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
 using DocumentFormat.OpenXml.Spreadsheet;
 using DocumentFormat.OpenXml.Wordprocessing;
+using ExcelDataReader;
 using SharpShell.SharpPreviewHandler;
 using A = DocumentFormat.OpenXml.Drawing;
 using W = DocumentFormat.OpenXml.Wordprocessing;
@@ -29,6 +31,7 @@ namespace WinPreviewPlus
         private DataGridView _grid;
         private RichTextBox _docBox;
         private string _xlsxPath;
+        private bool _binaryXls;
         private List<SheetInfo> _sheets;
         private int _activeSheet;
         private bool _fittingCols;
@@ -91,6 +94,7 @@ namespace WinPreviewPlus
             _docBox = null;
             _host.Controls.Clear();
             _xlsxPath = null;
+            _binaryXls = false;
             _sheets = null;
             _activeSheet = 0;
 
@@ -105,6 +109,9 @@ namespace WinPreviewPlus
                         break;
                     case "xlsx":
                         ShowXlsx(source.Path);
+                        break;
+                    case "xls":
+                        ShowXls(source.Path);
                         break;
                     case "pptx":
                         ShowPptx(source.Path);
@@ -140,16 +147,31 @@ namespace WinPreviewPlus
             try
             {
                 using (var fs = File.OpenRead(path))
-                using (var zip = new System.IO.Compression.ZipArchive(fs, System.IO.Compression.ZipArchiveMode.Read, true))
                 {
-                    if (zip.GetEntry("xl/workbook.xml") != null) return "xlsx";
-                    if (zip.GetEntry("word/document.xml") != null) return "docx";
-                    if (zip.GetEntry("ppt/presentation.xml") != null) return "pptx";
+                    if (fs.Length >= 8)
+                    {
+                        var sig = new byte[8];
+                        if (fs.Read(sig, 0, 8) == 8 &&
+                            sig[0] == 0xD0 && sig[1] == 0xCF && sig[2] == 0x11 && sig[3] == 0xE0 &&
+                            sig[4] == 0xA1 && sig[5] == 0xB1 && sig[6] == 0x1A && sig[7] == 0xE1)
+                        {
+                            // OLE Compound: .xls / .doc / .ppt — по расширению
+                            if (ext == ".xls") return "xls";
+                        }
+                        fs.Position = 0;
+                    }
+
+                    using (var zip = new System.IO.Compression.ZipArchive(fs, System.IO.Compression.ZipArchiveMode.Read, true))
+                    {
+                        if (zip.GetEntry("xl/workbook.xml") != null) return "xlsx";
+                        if (zip.GetEntry("word/document.xml") != null) return "docx";
+                        if (zip.GetEntry("ppt/presentation.xml") != null) return "pptx";
+                    }
                 }
             }
             catch { /* fall through */ }
 
-            if (ext == ".docx" || ext == ".xlsx" || ext == ".pptx")
+            if (ext == ".docx" || ext == ".xlsx" || ext == ".xls" || ext == ".pptx")
                 return ext.TrimStart('.');
             return null;
         }
@@ -267,10 +289,8 @@ namespace WinPreviewPlus
             }
         }
 
-        private void ShowXlsx(string path)
+        private void CreateExcelGrid()
         {
-            _xlsxPath = path;
-
             _grid = new DataGridView { Dock = DockStyle.Fill };
             PreviewUi.StyleGrid(_grid);
             // Как Excel: ячейки + номера строк + буквы столбцов
@@ -309,17 +329,11 @@ namespace WinPreviewPlus
             _grid.CellPainting += GridOnHeaderCellPainting;
             AttachGridContextMenu(_grid);
             _host.Controls.Add(_grid);
+        }
 
-            using (var doc = SpreadsheetDocument.Open(path, false))
-            {
-                var wb = doc.WorkbookPart;
-                _sheets = wb?.Workbook?.Sheets?.Elements<Sheet>()
-                    .Where(sh => sh.Id != null && sh.Name != null)
-                    .Select(sh => new SheetInfo { Name = sh.Name.Value, RelId = sh.Id.Value })
-                    .ToList() ?? new List<SheetInfo>();
-            }
-
-            if (_sheets.Count == 0)
+        private void FinishWorkbookPreview(string path, string kindLabel)
+        {
+            if (_sheets == null || _sheets.Count == 0)
             {
                 ShowError("Пустая книга Excel");
                 return;
@@ -330,7 +344,49 @@ namespace WinPreviewPlus
 
             FillSheetGrid(_sheets[0]);
             EnsureFindBar();
-            PreviewLog.Info("XLSX preview OK: " + path + " sheets=" + _sheets.Count);
+            PreviewLog.Info(kindLabel + " preview OK: " + path + " sheets=" + _sheets.Count);
+        }
+
+        private void ShowXlsx(string path)
+        {
+            _xlsxPath = path;
+            _binaryXls = false;
+            CreateExcelGrid();
+
+            using (var doc = SpreadsheetDocument.Open(path, false))
+            {
+                var wb = doc.WorkbookPart;
+                _sheets = wb?.Workbook?.Sheets?.Elements<Sheet>()
+                    .Where(sh => sh.Id != null && sh.Name != null)
+                    .Select(sh => new SheetInfo { Name = sh.Name.Value, RelId = sh.Id.Value })
+                    .ToList() ?? new List<SheetInfo>();
+            }
+
+            FinishWorkbookPreview(path, "XLSX");
+        }
+
+        private void ShowXls(string path)
+        {
+            _xlsxPath = path;
+            _binaryXls = true;
+            CreateExcelGrid();
+
+            _sheets = new List<SheetInfo>();
+            using (var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var reader = ExcelReaderFactory.CreateReader(stream))
+            {
+                int i = 0;
+                do
+                {
+                    var name = string.IsNullOrWhiteSpace(reader.Name)
+                        ? ("Лист" + (i + 1))
+                        : reader.Name;
+                    _sheets.Add(new SheetInfo { Name = name, RelId = i.ToString(CultureInfo.InvariantCulture) });
+                    i++;
+                } while (reader.NextResult());
+            }
+
+            FinishWorkbookPreview(path, "XLS");
         }
 
         private void GridOnResize(object sender, EventArgs e)
@@ -527,99 +583,19 @@ namespace WinPreviewPlus
 
             try
             {
-                using (var doc = SpreadsheetDocument.Open(_xlsxPath, false))
-                {
-                    var wb = doc.WorkbookPart;
-                    var shared = wb.SharedStringTablePart?.SharedStringTable;
-                    var styles = wb.WorkbookStylesPart;
-                    var part = (WorksheetPart)wb.GetPartById(sheet.RelId);
-                    var rows = part.Worksheet.Descendants<Row>().Take(500).ToList();
+                List<string[]> table;
+                List<int> excelRowNums;
+                int maxCol;
+                if (_binaryXls)
+                    ReadXlsSheet(sheet, out table, out excelRowNums, out maxCol);
+                else
+                    ReadXlsxSheet(sheet, out table, out excelRowNums, out maxCol);
 
-                    int maxCol = 0;
-                    var table = new List<string[]>();
-                    var excelRowNums = new List<int>();
-                    foreach (var row in rows)
-                    {
-                        int excelNum = row.RowIndex != null
-                            ? (int)row.RowIndex.Value
-                            : (excelRowNums.Count + 1);
-                        var map = new Dictionary<int, string>();
-                        foreach (var cell in row.Elements<Cell>())
-                        {
-                            int col = GetColumnIndex(cell.CellReference?.Value) ?? map.Count;
-                            map[col] = GetCellText(cell, shared, styles);
-                            if (col + 1 > maxCol) maxCol = col + 1;
-                        }
-                        if (map.Count == 0)
-                        {
-                            table.Add(new[] { "" });
-                            excelRowNums.Add(excelNum);
-                            maxCol = Math.Max(maxCol, 1);
-                            continue;
-                        }
-                        var values = new string[maxCol];
-                        for (int i = 0; i < maxCol; i++)
-                            values[i] = map.ContainsKey(i) ? map[i] : "";
-                        table.Add(values);
-                        excelRowNums.Add(excelNum);
-                    }
-
-                    for (int r = 0; r < table.Count; r++)
-                    {
-                        if (table[r].Length >= maxCol) continue;
-                        var enlarged = new string[maxCol];
-                        Array.Copy(table[r], enlarged, table[r].Length);
-                        for (int i = table[r].Length; i < maxCol; i++)
-                            enlarged[i] = "";
-                        table[r] = enlarged;
-                    }
-
-                    while (maxCol > 1)
-                    {
-                        bool any = false;
-                        for (int r = 0; r < table.Count; r++)
-                        {
-                            if (!string.IsNullOrWhiteSpace(table[r][maxCol - 1]))
-                            {
-                                any = true;
-                                break;
-                            }
-                        }
-                        if (any) break;
-                        maxCol--;
-                    }
-
-                    int colCount = Math.Min(Math.Max(maxCol, 1), 40);
-                    // Заголовки как в Excel: A B C…; первая строка листа остаётся данными
-                    for (int c = 0; c < colCount; c++)
-                        AddGridColumn(ColumnLetter(c));
-
-                    for (int r = 0; r < table.Count; r++)
-                    {
-                        bool empty = true;
-                        for (int c = 0; c < colCount && c < table[r].Length; c++)
-                        {
-                            if (!string.IsNullOrWhiteSpace(table[r][c])) { empty = false; break; }
-                        }
-                        if (empty) continue;
-
-                        var obj = new object[colCount];
-                        for (int c = 0; c < colCount; c++)
-                            obj[c] = c < table[r].Length ? table[r][c] : "";
-                        int idx = _grid.Rows.Add(obj);
-                        int num = r < excelRowNums.Count ? excelRowNums[r] : (r + 1);
-                        // Номер рисуем в RowPostPaint — HeaderCell.Value в prevhost даёт «.» вместо цифр
-                        _grid.Rows[idx].HeaderCell.Value = null;
-                        _grid.Rows[idx].Tag = num;
-                    }
-
-                    RefreshColumnHeaderTexts();
-                    ScheduleFitGridColumns();
-                }
+                ApplySheetTable(table, excelRowNums, maxCol);
             }
             catch (Exception ex)
             {
-                PreviewLog.Error("XLSX sheet failed: " + sheet.Name, ex);
+                PreviewLog.Error((_binaryXls ? "XLS" : "XLSX") + " sheet failed: " + sheet.Name, ex);
             }
             finally
             {
@@ -635,6 +611,174 @@ namespace WinPreviewPlus
                 _gridHits.Clear();
                 _matchIndex = -1;
             }
+        }
+
+        private void ReadXlsxSheet(SheetInfo sheet, out List<string[]> table, out List<int> excelRowNums, out int maxCol)
+        {
+            table = new List<string[]>();
+            excelRowNums = new List<int>();
+            maxCol = 0;
+
+            using (var doc = SpreadsheetDocument.Open(_xlsxPath, false))
+            {
+                var wb = doc.WorkbookPart;
+                var shared = wb.SharedStringTablePart?.SharedStringTable;
+                var styles = wb.WorkbookStylesPart;
+                var part = (WorksheetPart)wb.GetPartById(sheet.RelId);
+                var rows = part.Worksheet.Descendants<Row>().Take(500).ToList();
+
+                foreach (var row in rows)
+                {
+                    int excelNum = row.RowIndex != null
+                        ? (int)row.RowIndex.Value
+                        : (excelRowNums.Count + 1);
+                    var map = new Dictionary<int, string>();
+                    foreach (var cell in row.Elements<Cell>())
+                    {
+                        int col = GetColumnIndex(cell.CellReference?.Value) ?? map.Count;
+                        map[col] = GetCellText(cell, shared, styles);
+                        if (col + 1 > maxCol) maxCol = col + 1;
+                    }
+                    if (map.Count == 0)
+                    {
+                        table.Add(new[] { "" });
+                        excelRowNums.Add(excelNum);
+                        maxCol = Math.Max(maxCol, 1);
+                        continue;
+                    }
+                    var values = new string[maxCol];
+                    for (int i = 0; i < maxCol; i++)
+                        values[i] = map.ContainsKey(i) ? map[i] : "";
+                    table.Add(values);
+                    excelRowNums.Add(excelNum);
+                }
+            }
+
+            NormalizeSheetTable(table, ref maxCol);
+        }
+
+        private void ReadXlsSheet(SheetInfo sheet, out List<string[]> table, out List<int> excelRowNums, out int maxCol)
+        {
+            table = new List<string[]>();
+            excelRowNums = new List<int>();
+            maxCol = 0;
+
+            if (!int.TryParse(sheet.RelId, NumberStyles.Integer, CultureInfo.InvariantCulture, out int target))
+                return;
+
+            using (var stream = File.Open(_xlsxPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var reader = ExcelReaderFactory.CreateReader(stream))
+            {
+                int idx = 0;
+                do
+                {
+                    if (idx == target)
+                    {
+                        int rowNum = 0;
+                        while (reader.Read() && table.Count < 500)
+                        {
+                            rowNum++;
+                            int fields = reader.FieldCount;
+                            if (fields <= 0)
+                            {
+                                table.Add(new[] { "" });
+                                excelRowNums.Add(rowNum);
+                                maxCol = Math.Max(maxCol, 1);
+                                continue;
+                            }
+
+                            if (fields > maxCol) maxCol = fields;
+                            var values = new string[fields];
+                            for (int c = 0; c < fields; c++)
+                                values[c] = FormatXlsCell(reader.IsDBNull(c) ? null : reader.GetValue(c));
+                            table.Add(values);
+                            excelRowNums.Add(rowNum);
+                        }
+                        break;
+                    }
+                    idx++;
+                } while (reader.NextResult());
+            }
+
+            NormalizeSheetTable(table, ref maxCol);
+        }
+
+        private static string FormatXlsCell(object value)
+        {
+            if (value == null || value is DBNull) return "";
+            if (value is DateTime dt)
+                return dt.ToString("g", CultureInfo.CurrentCulture);
+            if (value is double d)
+            {
+                if (Math.Abs(d - Math.Truncate(d)) < 1e-9 && !double.IsNaN(d) && !double.IsInfinity(d))
+                    return ((long)Math.Truncate(d)).ToString(CultureInfo.CurrentCulture);
+                return d.ToString(CultureInfo.CurrentCulture);
+            }
+            if (value is float f)
+                return Convert.ToDouble(f).ToString(CultureInfo.CurrentCulture);
+            if (value is decimal m)
+                return m.ToString(CultureInfo.CurrentCulture);
+            if (value is bool b)
+                return b ? "TRUE" : "FALSE";
+            return Convert.ToString(value, CultureInfo.CurrentCulture) ?? "";
+        }
+
+        private static void NormalizeSheetTable(List<string[]> table, ref int maxCol)
+        {
+            for (int r = 0; r < table.Count; r++)
+            {
+                if (table[r].Length >= maxCol) continue;
+                var enlarged = new string[maxCol];
+                Array.Copy(table[r], enlarged, table[r].Length);
+                for (int i = table[r].Length; i < maxCol; i++)
+                    enlarged[i] = "";
+                table[r] = enlarged;
+            }
+
+            while (maxCol > 1)
+            {
+                bool any = false;
+                for (int r = 0; r < table.Count; r++)
+                {
+                    if (!string.IsNullOrWhiteSpace(table[r][maxCol - 1]))
+                    {
+                        any = true;
+                        break;
+                    }
+                }
+                if (any) break;
+                maxCol--;
+            }
+        }
+
+        private void ApplySheetTable(List<string[]> table, List<int> excelRowNums, int maxCol)
+        {
+            int colCount = Math.Min(Math.Max(maxCol, 1), 40);
+            // Заголовки как в Excel: A B C…; первая строка листа остаётся данными
+            for (int c = 0; c < colCount; c++)
+                AddGridColumn(ColumnLetter(c));
+
+            for (int r = 0; r < table.Count; r++)
+            {
+                bool empty = true;
+                for (int c = 0; c < colCount && c < table[r].Length; c++)
+                {
+                    if (!string.IsNullOrWhiteSpace(table[r][c])) { empty = false; break; }
+                }
+                if (empty) continue;
+
+                var obj = new object[colCount];
+                for (int c = 0; c < colCount; c++)
+                    obj[c] = c < table[r].Length ? table[r][c] : "";
+                int idx = _grid.Rows.Add(obj);
+                int num = r < excelRowNums.Count ? excelRowNums[r] : (r + 1);
+                // Номер рисуем в RowPostPaint — HeaderCell.Value в prevhost даёт «.» вместо цифр
+                _grid.Rows[idx].HeaderCell.Value = null;
+                _grid.Rows[idx].Tag = num;
+            }
+
+            RefreshColumnHeaderTexts();
+            ScheduleFitGridColumns();
         }
 
         private void ScheduleFitGridColumns()
