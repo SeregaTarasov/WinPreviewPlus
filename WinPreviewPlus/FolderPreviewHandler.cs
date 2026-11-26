@@ -21,6 +21,7 @@ namespace WinPreviewPlus
         static FolderPreviewHandler()
         {
             PreviewAssemblyResolve.Ensure();
+            PreviewSource.PurgeStaleTemp();
         }
 
         int IInitializeWithFile.Initialize(string pszFilePath, STGM grfMode)

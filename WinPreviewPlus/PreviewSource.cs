@@ -3,6 +3,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
+using System.Threading;
 using SharpShell.SharpPreviewHandler;
 
 namespace WinPreviewPlus
@@ -26,6 +27,10 @@ namespace WinPreviewPlus
         // Маленький снимок: DoPreview идёт синхронно из Проводника — копия 100+ МБ
         // подвешивает explorer.exe (иконка на панели откликается со 2–3 раза).
         public const long SnapshotLimit = 8L * 1024 * 1024;
+
+        /// <summary>Столько живут временные каталоги, если их не успели убрать штатно.</summary>
+        private static readonly TimeSpan StaleTempAge = TimeSpan.FromHours(24);
+        private static int _purgeState;
 
         public static FileStream OpenSharedRead(string path)
         {
@@ -327,6 +332,61 @@ namespace WinPreviewPlus
         {
             if (string.IsNullOrEmpty(path)) return;
             try { if (File.Exists(path)) File.Delete(path); } catch { }
+        }
+
+        /// <summary>
+        /// Разовая (на процесс) уборка старых temp-каталогов: снимки превью,
+        /// распакованные «открыть» и drag&amp;drop. Штатно их удаляет Dispose,
+        /// но после падения prevhost или аварийного закрытия Проводника они
+        /// остаются и копятся в %LOCALAPPDATA%\WinPreviewPlus навсегда.
+        /// </summary>
+        public static void PurgeStaleTemp()
+        {
+            if (Interlocked.Exchange(ref _purgeState, 1) != 0) return;
+            try
+            {
+                var root = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "WinPreviewPlus");
+                PurgeDir(System.IO.Path.Combine(root, "tmp"));
+                PurgeDir(System.IO.Path.Combine(root, "drag"));
+                PurgeDir(System.IO.Path.Combine(root, "open"));
+            }
+            catch (Exception ex)
+            {
+                PreviewLog.Error("PurgeStaleTemp failed (non-fatal)", ex);
+            }
+        }
+
+        /// <summary>Удаляет элементы каталога старше StaleTempAge. Свежие не трогает
+        /// (их может читать другой экземпляр prevhost).</summary>
+        private static void PurgeDir(string dir)
+        {
+            if (!Directory.Exists(dir)) return;
+            var cutoffUtc = DateTime.UtcNow - StaleTempAge;
+            try
+            {
+                foreach (var entry in Directory.EnumerateFileSystemEntries(dir))
+                {
+                    try
+                    {
+                        var isDir = Directory.Exists(entry);
+                        var writtenUtc = isDir
+                            ? Directory.GetLastWriteTimeUtc(entry)
+                            : File.GetLastWriteTimeUtc(entry);
+                        if (writtenUtc > cutoffUtc) continue;
+                        if (isDir)
+                            Directory.Delete(entry, true);
+                        else
+                            File.Delete(entry);
+                    }
+                    catch { /* занято другим процессом — пропускаем, уберём позже */ }
+                }
+            }
+            catch (Exception ex)
+            {
+                PreviewLog.Error("PurgeDir failed: " + dir, ex);
+            }
         }
 
         public void Dispose()

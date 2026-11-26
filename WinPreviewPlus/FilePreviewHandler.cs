@@ -17,6 +17,8 @@ namespace WinPreviewPlus
         protected FilePreviewHandler()
         {
             PreviewAssemblyResolve.Ensure();
+            // Убираем temp-каталоги, оставшиеся от прошлых сессий (разово на процесс).
+            PreviewSource.PurgeStaleTemp();
         }
 
         protected abstract long MaxBytes { get; }

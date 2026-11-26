@@ -49,6 +49,12 @@ $dllPath = Join-Path $deploy 'WinPreviewPlus.dll'
 $regasm = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe'
 if (-not (Test-Path $regasm)) { throw "RegAsm not found: $regasm" }
 
+# Повторная установка падает в RegAsm: SharpShell ClassOfExtension оставляет
+# пустые ProgID-классы <ext>.1, которые он же потом не узнаёт при перерегистрации.
+# Чистим их перед регистрацией — установка становится идемпотентной.
+Write-Host 'Purging stale SharpShell ProgID classes ...'
+& (Join-Path $Root 'Purge-StaleProgIds.ps1') -Root $Root
+
 Push-Location $deploy
 try {
   Write-Host 'RegAsm /codebase ...'

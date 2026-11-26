@@ -119,6 +119,7 @@ namespace WinPreviewPlus
                 {
                     Filter = isDir ? "*.*" : filter,
                     IncludeSubdirectories = false,
+                    InternalBufferSize = 64 * 1024,
                     NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName |
                                    NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.CreationTime
                 };
@@ -126,6 +127,7 @@ namespace WinPreviewPlus
                 _watch.Created += OnFs;
                 _watch.Deleted += OnFs;
                 _watch.Renamed += OnFs;
+                _watch.Error += OnWatchError;
                 _watch.EnableRaisingEvents = true;
             }
             catch (Exception ex)
@@ -144,6 +146,17 @@ namespace WinPreviewPlus
                 _debounce.Stop();
                 _debounce.Start();
             });
+        }
+
+        /// <summary>
+        /// При переполнении внутреннего буфера watcher перестаёт слать события —
+        /// без этого обработчика live-обновление умирает молча. Пере-вооружаемся.
+        /// </summary>
+        private void OnWatchError(object sender, ErrorEventArgs e)
+        {
+            if (_disposed) return;
+            try { PreviewLog.Error("PreviewLiveSync watcher error", e?.GetException()); } catch { }
+            Ui(ArmWatcher);
         }
 
         private void FireFile()
@@ -202,6 +215,7 @@ namespace WinPreviewPlus
                 _watch.Created -= OnFs;
                 _watch.Deleted -= OnFs;
                 _watch.Renamed -= OnFs;
+                _watch.Error -= OnWatchError;
                 _watch.Dispose();
             }
             catch { }
