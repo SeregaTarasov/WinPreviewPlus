@@ -22,7 +22,8 @@ namespace WinPreviewPlus.Register
                     new TextPreviewHandler(),
                     new AudioPreviewHandler(),
                     new VideoPreviewHandler(),
-                    new ImagePreviewHandler()
+                    new ImagePreviewHandler(),
+                    new FolderPreviewHandler()
                 };
 
                 foreach (var server in servers)

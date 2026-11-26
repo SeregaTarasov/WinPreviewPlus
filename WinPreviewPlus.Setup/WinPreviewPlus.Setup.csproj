@@ -13,10 +13,13 @@
     <Prefer32Bit>false</Prefer32Bit>
     <Product>WinPreviewPlus</Product>
     <AssemblyTitle>WinPreviewPlus Setup</AssemblyTitle>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Company>WinPreviewPlus</Company>
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\WinPreviewPlus\PreviewCatalog.cs" Link="PreviewCatalog.cs" />
+  </ItemGroup>
   <ItemGroup>
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.IO.Compression" />

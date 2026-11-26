@@ -24,8 +24,11 @@ namespace WinPreviewPlus
         private Label _btnSaveLabel;
         private Panel _btnFind;
         private Label _btnFindLabel;
+        private Panel _btnWrap;
+        private Label _btnWrapLabel;
         private bool _saveEnabled;
         private PreviewSource _source;
+        private PreviewLiveSync _live;
         private Encoding _encoding = new UTF8Encoding(false);
         private bool _hasBom;
         private bool _dirty;
@@ -33,7 +36,10 @@ namespace WinPreviewPlus
         private string _savePath;
         private int _saveBtnW;
         private int _findBtnW;
+        private int _wrapBtnW;
+        private bool _wordWrap;
         private string _flashStatus;
+        private string _readOnlyNote;
         private Timer _flashTimer;
         private Timer _findDebounce;
         private string _findQuery = "";
@@ -92,6 +98,11 @@ namespace WinPreviewPlus
                 ShowFindBar(false);
                 return true;
             }
+            if (keyData == (Keys.Control | Keys.W))
+            {
+                ToggleWordWrapFromHost();
+                return true;
+            }
             if (keyData == (Keys.Control | Keys.A))
             {
                 if (_findBar?.Box != null && _findBar.Box.Focused)
@@ -111,6 +122,7 @@ namespace WinPreviewPlus
 
         public void LoadText(PreviewSource source)
         {
+            StopTimers();
             _source = source;
             _dirty = false;
             _host.Controls.Clear();
@@ -127,7 +139,7 @@ namespace WinPreviewPlus
                 ScrollBars = ScrollBars.Both,
                 WordWrap = false,
                 AcceptsTab = true,
-                Font = new Font("Consolas", 10.5f),
+                Font = PreviewUi.FontEditor,
                 BorderStyle = BorderStyle.None,
                 BackColor = PreviewUi.Surface,
                 ForeColor = PreviewUi.TextPrimary,
@@ -170,30 +182,56 @@ namespace WinPreviewPlus
 
             try
             {
-                byte[] bytes = File.ReadAllBytes(source.Path);
                 _loading = true;
-                if (IsBinaryPlist(bytes))
+                var ext = (Path.GetExtension(source.Path) ?? "").ToLowerInvariant();
+                if (ext == ".rtf" && TryLoadRtfPlain(source.Path, out string rtfText))
                 {
                     _encoding = new UTF8Encoding(false);
                     _hasBom = false;
                     _editor.ReadOnly = true;
-                    _editor.Text =
-                        "Бинарный Apple plist (bplist).\r\n\r\n" +
-                        "Текстовый просмотр недоступен. XML-.plist открываются как обычно.\r\n" +
-                        "На macOS/iOS: plutil -convert xml1 …";
+                    _editor.Text = rtfText;
                     _loading = false;
                     _dirty = false;
-                    _savePath = null; // не предлагать Save поверх бинарника
+                    _savePath = null;
+                    _readOnlyNote = "RTF · только чтение";
                     RefreshStatus();
                 }
                 else
                 {
-                    _editor.ReadOnly = false;
-                    DetectEncoding(bytes, out _encoding, out _hasBom, out int skip);
-                    _editor.Text = _encoding.GetString(bytes, skip, bytes.Length - skip);
-                    _loading = false;
-                    _dirty = false;
-                    RefreshStatus();
+                    byte[] bytes = ReadPreviewBytes(source.Path, out bool truncated);
+                    if (IsBinaryPlist(bytes))
+                    {
+                        ShowLockedText(
+                            "Бинарный Apple plist (bplist).\r\n\r\n" +
+                            "Текстовый просмотр недоступен. XML-.plist открываются как обычно.\r\n" +
+                            "На macOS/iOS: plutil -convert xml1 …",
+                            "bplist · только чтение");
+                    }
+                    else if (LooksBinary(bytes) && !LooksUtf16Le(bytes) && !LooksUtf16Be(bytes))
+                    {
+                        ShowLockedText(
+                            "Файл похож на двоичный — текст не показан, чтобы не испортить его сохранением.",
+                            "двоичный · только чтение");
+                    }
+                    else
+                    {
+                        DetectEncoding(bytes, out _encoding, out _hasBom, out int skip);
+                        if (truncated && _encoding is UTF8Encoding)
+                            bytes = TrimPartialUtf8(bytes, skip);
+                        else if (truncated && _encoding is UnicodeEncoding &&
+                                 ((bytes.Length - skip) % 2) != 0 && bytes.Length > skip)
+                            Array.Resize(ref bytes, bytes.Length - 1);
+                        _editor.ReadOnly = truncated;
+                        _editor.Text = _encoding.GetString(bytes, skip, Math.Max(0, bytes.Length - skip));
+                        _loading = false;
+                        _dirty = false;
+                        if (truncated)
+                        {
+                            _savePath = null;
+                            _readOnlyNote = "показано начало файла · только чтение";
+                        }
+                        RefreshStatus();
+                    }
                 }
                 // Не ArmEditor при загрузке — иначе Backspace в списке файлов съедается превью
                 PreviewLog.Info("Text preview OK: " + source.Path + " enc=" + _encoding.WebName +
@@ -205,6 +243,18 @@ namespace WinPreviewPlus
                 ShowError("Не удалось открыть: " + ex.Message);
                 PreviewLog.Error("Text preview failed: " + source.Path, ex);
             }
+            BindLive();
+        }
+
+        private void BindLive()
+        {
+            _live?.Dispose();
+            _live = PreviewLiveSync.ForSource(
+                this,
+                () => _source,
+                () => { if (_source != null) LoadText(_source); },
+                () => LayoutBar(),
+                () => !_dirty);
         }
 
         private void EditorOnKeyDown(object sender, KeyEventArgs e)
@@ -277,6 +327,20 @@ namespace WinPreviewPlus
             return true;
         }
 
+        public void ToggleWordWrapFromHost()
+        {
+            if (_editor == null) return;
+            _wordWrap = !_wordWrap;
+            _editor.WordWrap = _wordWrap;
+            _editor.ScrollBars = _wordWrap ? ScrollBars.Vertical : ScrollBars.Both;
+            if (_btnWrap != null)
+            {
+                _btnWrap.BackColor = _wordWrap ? PreviewUi.TabActive : PreviewUi.TabIdle;
+                if (_btnWrapLabel != null)
+                    _btnWrapLabel.ForeColor = _wordWrap ? Color.White : PreviewUi.TextPrimary;
+            }
+        }
+
         [DllImport("user32.dll")]
         private static extern IntPtr GetFocus();
 
@@ -344,13 +408,9 @@ namespace WinPreviewPlus
                 ForeColor = PreviewUi.TextMuted
             };
 
+            StopTimer(ref _flashTimer);
             _flashTimer = new Timer { Interval = 2200 };
-            _flashTimer.Tick += (s, e) =>
-            {
-                _flashTimer.Stop();
-                _flashStatus = null;
-                RefreshStatus();
-            };
+            _flashTimer.Tick += OnFlashTick;
 
             _findBtnW = TextRenderer.MeasureText("Найти", PreviewUi.FontUi).Width + 24;
             _btnFind = new Panel
@@ -378,8 +438,42 @@ namespace WinPreviewPlus
             _btnFind.MouseLeave += (s, e) => _btnFind.BackColor = PreviewUi.TabIdle;
             _btnFind.Controls.Add(_btnFindLabel);
 
+            _wrapBtnW = TextRenderer.MeasureText("Перенос", PreviewUi.FontUi).Width + 24;
+            _btnWrap = new Panel
+            {
+                Width = _wrapBtnW,
+                Height = SaveBtnH,
+                BackColor = PreviewUi.TabIdle,
+                Cursor = Cursors.Hand
+            };
+            PreviewUi.EnableDoubleBuffer(_btnWrap);
+            _btnWrapLabel = new Label
+            {
+                Text = "Перенос",
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = PreviewUi.FontUi,
+                ForeColor = PreviewUi.TextPrimary,
+                BackColor = Color.Transparent,
+                Cursor = Cursors.Hand
+            };
+            void OnWrapClick(object s, EventArgs e) => ToggleWordWrapFromHost();
+            _btnWrap.Click += OnWrapClick;
+            _btnWrapLabel.Click += OnWrapClick;
+            _btnWrap.MouseEnter += (s, e) =>
+            {
+                if (!_wordWrap) _btnWrap.BackColor = Color.FromArgb(220, 224, 232);
+            };
+            _btnWrap.MouseLeave += (s, e) =>
+            {
+                _btnWrap.BackColor = _wordWrap ? PreviewUi.TabActive : PreviewUi.TabIdle;
+            };
+            _btnWrap.Controls.Add(_btnWrapLabel);
+            new ToolTip().SetToolTip(_btnWrap, "Перенос строк (Ctrl+W)");
+
             _bar.Controls.Add(bottomLine);
             _bar.Controls.Add(_status);
+            _bar.Controls.Add(_btnWrap);
             _bar.Controls.Add(_btnFind);
             _bar.Controls.Add(_btnSave);
             _bar.Resize += (s, e) => LayoutBar();
@@ -391,17 +485,14 @@ namespace WinPreviewPlus
             if (_findDebounce == null)
             {
                 _findDebounce = new Timer { Interval = 160 };
-                _findDebounce.Tick += (s, e) =>
-                {
-                    _findDebounce.Stop();
-                    RebuildMatchesAndSelect(resetIndex: true);
-                };
+                _findDebounce.Tick += OnFindDebounceTick;
             }
 
             _findBar = new PreviewFindBar();
             _findBar.BoxKeyDown += FindBoxOnKeyDown;
             _findBar.BoxTextChanged += (s, e) =>
             {
+                if (_findDebounce == null || IsDisposed) return;
                 _findDebounce.Stop();
                 _findDebounce.Start();
             };
@@ -555,9 +646,53 @@ namespace WinPreviewPlus
             }
         }
 
+        private void OnFlashTick(object sender, EventArgs e)
+        {
+            try
+            {
+                (sender as Timer)?.Stop();
+                if (IsDisposed) return;
+                _flashStatus = null;
+                RefreshStatus();
+            }
+            catch (Exception ex)
+            {
+                PreviewLog.Error("Text flash tick", ex);
+            }
+        }
+
+        private void OnFindDebounceTick(object sender, EventArgs e)
+        {
+            try
+            {
+                (sender as Timer)?.Stop();
+                if (IsDisposed || _editor == null) return;
+                RebuildMatchesAndSelect(resetIndex: true);
+            }
+            catch (Exception ex)
+            {
+                PreviewLog.Error("Text find debounce", ex);
+            }
+        }
+
+        private void StopTimers()
+        {
+            StopTimer(ref _flashTimer);
+            StopTimer(ref _findDebounce);
+        }
+
+        private static void StopTimer(ref Timer timer)
+        {
+            var t = timer;
+            timer = null;
+            if (t == null) return;
+            try { t.Stop(); } catch { }
+            try { t.Dispose(); } catch { }
+        }
+
         private void LayoutBar()
         {
-            if (_bar == null) return;
+            if (_bar == null || _btnSave == null || _status == null) return;
             int y = Math.Max(0, (_bar.ClientSize.Height - 1 - SaveBtnH) / 2);
             int x = 8;
             _btnSave.SetBounds(x, y, _saveBtnW, SaveBtnH);
@@ -565,7 +700,12 @@ namespace WinPreviewPlus
             if (_btnFind != null)
             {
                 _btnFind.SetBounds(x, y, _findBtnW, SaveBtnH);
-                x += _findBtnW + 12;
+                x += _findBtnW + 6;
+            }
+            if (_btnWrap != null)
+            {
+                _btnWrap.SetBounds(x, y, _wrapBtnW, SaveBtnH);
+                x += _wrapBtnW + 12;
             }
             _status.SetBounds(x, y, Math.Max(40, _bar.ClientSize.Width - x - 8), SaveBtnH);
         }
@@ -573,11 +713,13 @@ namespace WinPreviewPlus
         private void RefreshStatus()
         {
             if (_status == null) return;
-            string text = "Ctrl+S · Ctrl+F";
+            string text = "Ctrl+S · Ctrl+F · Ctrl+W";
             if (!string.IsNullOrEmpty(_flashStatus))
                 text += " · " + _flashStatus;
             else if (_dirty)
                 text += " · Изменено";
+            else if (!string.IsNullOrEmpty(_readOnlyNote))
+                text += " · " + _readOnlyNote;
             else if (string.IsNullOrEmpty(_savePath))
                 text += " · Только чтение";
             _status.Text = text;
@@ -640,6 +782,102 @@ namespace WinPreviewPlus
             }
         }
 
+        private void ShowLockedText(string body, string note)
+        {
+            _encoding = new UTF8Encoding(false);
+            _hasBom = false;
+            _editor.ReadOnly = true;
+            _editor.Text = body;
+            _loading = false;
+            _dirty = false;
+            _savePath = null;
+            _readOnlyNote = note;
+            RefreshStatus();
+        }
+
+        private const int MaxTextBytes = 4 * 1024 * 1024;
+
+        private static byte[] ReadPreviewBytes(string path, out bool truncated)
+        {
+            truncated = false;
+            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read,
+                       FileShare.ReadWrite | FileShare.Delete))
+            {
+                if (fs.Length > MaxTextBytes)
+                    truncated = true;
+                int take = (int)Math.Min(fs.Length, MaxTextBytes);
+                var buf = new byte[take];
+                int got = 0;
+                while (got < take)
+                {
+                    int n = fs.Read(buf, got, take - got);
+                    if (n <= 0) break;
+                    got += n;
+                }
+                if (got != buf.Length)
+                    Array.Resize(ref buf, got);
+                return buf;
+            }
+        }
+
+        private static bool TryLoadRtfPlain(string path, out string text)
+        {
+            text = null;
+            try
+            {
+                using (var box = new RichTextBox())
+                {
+                    box.LoadFile(path, RichTextBoxStreamType.RichText);
+                    text = box.Text ?? "";
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                PreviewLog.Error("RTF plain extract failed: " + path, ex);
+                return false;
+            }
+        }
+
+        private static byte[] TrimPartialUtf8(byte[] bytes, int skip)
+        {
+            if (bytes == null || bytes.Length <= skip) return bytes;
+            int i = bytes.Length - 1;
+            int cont = 0;
+            while (i >= skip && cont < 3 && (bytes[i] & 0xC0) == 0x80)
+            {
+                cont++;
+                i--;
+            }
+            if (i < skip) return bytes;
+            int need;
+            byte b = bytes[i];
+            if ((b & 0x80) == 0) need = 1;
+            else if ((b & 0xE0) == 0xC0) need = 2;
+            else if ((b & 0xF0) == 0xE0) need = 3;
+            else if ((b & 0xF8) == 0xF0) need = 4;
+            else return bytes;
+            if (1 + cont >= need) return bytes;
+            var cut = new byte[i];
+            Buffer.BlockCopy(bytes, 0, cut, 0, i);
+            return cut;
+        }
+
+        private static bool LooksBinary(byte[] bytes)
+        {
+            if (bytes == null || bytes.Length == 0) return false;
+            int n = Math.Min(bytes.Length, 8192);
+            int nul = 0;
+            int ctrl = 0;
+            for (int i = 0; i < n; i++)
+            {
+                byte b = bytes[i];
+                if (b == 0) nul++;
+                else if (b < 9 || (b > 13 && b < 32)) ctrl++;
+            }
+            return nul * 20 > n || ctrl * 5 > n;
+        }
+
         private static bool IsBinaryPlist(byte[] bytes)
         {
             // Apple binary property list magic: "bplist"
@@ -678,6 +916,17 @@ namespace WinPreviewPlus
                 return;
             }
 
+            if (LooksUtf16Le(bytes))
+            {
+                encoding = Encoding.Unicode;
+                return;
+            }
+            if (LooksUtf16Be(bytes))
+            {
+                encoding = Encoding.BigEndianUnicode;
+                return;
+            }
+
             if (IsValidUtf8(bytes))
             {
                 encoding = new UTF8Encoding(false);
@@ -692,6 +941,33 @@ namespace WinPreviewPlus
             {
                 encoding = Encoding.Default;
             }
+        }
+
+        private static bool LooksUtf16Le(byte[] bytes)
+        {
+            return LooksUtf16(bytes, lowAscii: true);
+        }
+
+        private static bool LooksUtf16Be(byte[] bytes)
+        {
+            return LooksUtf16(bytes, lowAscii: false);
+        }
+
+        private static bool LooksUtf16(byte[] bytes, bool lowAscii)
+        {
+            int n = Math.Min(bytes?.Length ?? 0, 4096);
+            n -= n % 2;
+            if (n < 16) return false;
+            int pairs = 0;
+            int ascii = 0;
+            for (int i = 0; i + 1 < n; i += 2)
+            {
+                pairs++;
+                byte lo = lowAscii ? bytes[i] : bytes[i + 1];
+                byte hi = lowAscii ? bytes[i + 1] : bytes[i];
+                if (hi == 0 && lo >= 9 && lo < 127) ascii++;
+            }
+            return pairs > 8 && ascii * 10 > pairs * 6;
         }
 
         private static bool IsValidUtf8(byte[] bytes)
@@ -725,37 +1001,9 @@ namespace WinPreviewPlus
         {
             if (disposing)
             {
-                if (_dirty && !string.IsNullOrEmpty(_savePath) && _editor != null)
-                {
-                    try
-                    {
-                        var name = _source?.DisplayName ?? Path.GetFileName(_savePath);
-                        var r = MessageBox.Show(
-                            "Сохранить изменения в «" + name + "»?",
-                            "Текст",
-                            MessageBoxButtons.YesNo,
-                            MessageBoxIcon.Question,
-                            MessageBoxDefaultButton.Button1);
-                        if (r == DialogResult.Yes)
-                            Save();
-                    }
-                    catch (Exception ex)
-                    {
-                        PreviewLog.Error("Text dispose save prompt", ex);
-                    }
-                }
-                if (_flashTimer != null)
-                {
-                    _flashTimer.Stop();
-                    _flashTimer.Dispose();
-                    _flashTimer = null;
-                }
-                if (_findDebounce != null)
-                {
-                    _findDebounce.Stop();
-                    _findDebounce.Dispose();
-                    _findDebounce = null;
-                }
+                StopTimers();
+                _live?.Dispose();
+                _live = null;
                 _source?.Dispose();
                 _source = null;
             }

@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Windows.Forms;
+using System.Xml;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
@@ -22,6 +23,7 @@ namespace WinPreviewPlus
     {
         private readonly Panel _host;
         private PreviewSource _source;
+        private PreviewLiveSync _live;
 
         private Panel _sheetBar;
         private Label _sheetName;
@@ -116,6 +118,9 @@ namespace WinPreviewPlus
                     case "pptx":
                         ShowPptx(source.Path);
                         break;
+                    case "odf":
+                        ShowOdf(source.Path);
+                        break;
                     default:
                         ShowError("Неподдерживаемый тип: " + ext);
                         break;
@@ -126,6 +131,22 @@ namespace WinPreviewPlus
                 ShowError("Не удалось открыть: " + ex.Message);
                 PreviewLog.Error("Office preview failed: " + source.Path, ex);
             }
+            BindLive();
+        }
+
+        private void BindLive()
+        {
+            _live?.Dispose();
+            _live = PreviewLiveSync.ForSource(
+                this,
+                () => _source,
+                () => { if (_source != null) LoadOffice(_source); },
+                () =>
+                {
+                    LayoutSheetBar();
+                    if (_grid != null)
+                        PreviewUi.FitColumnsContentThenFillLast(_grid);
+                });
         }
 
         private void ShowError(string message)
@@ -146,7 +167,7 @@ namespace WinPreviewPlus
         {
             try
             {
-                using (var fs = File.OpenRead(path))
+                using (var fs = PreviewSource.OpenSharedRead(path))
                 {
                     if (fs.Length >= 8)
                     {
@@ -155,8 +176,8 @@ namespace WinPreviewPlus
                             sig[0] == 0xD0 && sig[1] == 0xCF && sig[2] == 0x11 && sig[3] == 0xE0 &&
                             sig[4] == 0xA1 && sig[5] == 0xB1 && sig[6] == 0x1A && sig[7] == 0xE1)
                         {
-                            // OLE Compound: .xls / .doc / .ppt — по расширению
-                            if (ext == ".xls") return "xls";
+                            // OLE Compound: .xls / .xlt. .doc и .ppt сюда не входят.
+                            if (ext == ".xls" || ext == ".xlt") return "xls";
                         }
                         fs.Position = 0;
                     }
@@ -164,16 +185,127 @@ namespace WinPreviewPlus
                     using (var zip = new System.IO.Compression.ZipArchive(fs, System.IO.Compression.ZipArchiveMode.Read, true))
                     {
                         if (zip.GetEntry("xl/workbook.xml") != null) return "xlsx";
+                        if (zip.GetEntry("xl/workbook.bin") != null) return "xls";
                         if (zip.GetEntry("word/document.xml") != null) return "docx";
                         if (zip.GetEntry("ppt/presentation.xml") != null) return "pptx";
+                        if (zip.GetEntry("content.xml") != null) return "odf";
                     }
                 }
             }
             catch { /* fall through */ }
 
-            if (ext == ".docx" || ext == ".xlsx" || ext == ".xls" || ext == ".pptx")
-                return ext.TrimStart('.');
-            return null;
+            return KindFromExtension(ext);
+        }
+
+        private static string KindFromExtension(string ext)
+        {
+            switch (ext)
+            {
+                case ".docx":
+                case ".docm":
+                case ".dotx":
+                case ".dotm":
+                    return "docx";
+                case ".xlsx":
+                case ".xlsm":
+                case ".xltx":
+                case ".xltm":
+                    return "xlsx";
+                case ".xls":
+                case ".xlsb":
+                case ".xlt":
+                    return "xls";
+                case ".pptx":
+                case ".pptm":
+                case ".potx":
+                case ".potm":
+                case ".ppsx":
+                case ".ppsm":
+                    return "pptx";
+                case ".odt":
+                case ".ods":
+                case ".odp":
+                case ".odg":
+                    return "odf";
+                default:
+                    return null;
+            }
+        }
+
+        /// <summary>OpenDocument: текст из content.xml без LibreOffice.</summary>
+        private void ShowOdf(string path)
+        {
+            var box = PreviewUi.CreateDocumentBox();
+            var sb = new StringBuilder();
+            int paras = 0;
+            using (var zipStream = PreviewSource.OpenSharedRead(path))
+            using (var zip = new System.IO.Compression.ZipArchive(zipStream, System.IO.Compression.ZipArchiveMode.Read, false))
+            {
+                var entry = zip.GetEntry("content.xml");
+                if (entry == null)
+                {
+                    ShowError("В файле нет content.xml");
+                    return;
+                }
+                var settings = new XmlReaderSettings
+                {
+                    DtdProcessing = DtdProcessing.Prohibit,
+                    XmlResolver = null
+                };
+                using (var stream = entry.Open())
+                using (var reader = XmlReader.Create(stream, settings))
+                {
+                    while (reader.Read())
+                    {
+                        if (paras >= 4000) break;
+                        if (reader.NodeType == XmlNodeType.Element)
+                        {
+                            var name = reader.LocalName;
+                            if (name == "s")
+                            {
+                                int count = 1;
+                                var raw = reader.GetAttribute("c");
+                                if (int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) &&
+                                    parsed > 0)
+                                    count = Math.Min(parsed, 200);
+                                sb.Append(' ', count);
+                            }
+                            else if (name == "line-break" || name == "tab")
+                            {
+                                sb.Append(name == "tab" ? '\t' : '\n');
+                            }
+                        }
+                        else if (reader.NodeType == XmlNodeType.Text || reader.NodeType == XmlNodeType.CDATA)
+                        {
+                            sb.Append(reader.Value);
+                        }
+                        else if (reader.NodeType == XmlNodeType.EndElement)
+                        {
+                            var name = reader.LocalName;
+                            if (name == "p" || name == "h")
+                            {
+                                sb.AppendLine();
+                                paras++;
+                            }
+                            else if (name == "table-row")
+                            {
+                                sb.AppendLine();
+                                paras++;
+                            }
+                            else if (name == "table-cell")
+                            {
+                                sb.Append('\t');
+                            }
+                        }
+                    }
+                }
+            }
+
+            box.Text = sb.ToString().Trim();
+            if (string.IsNullOrWhiteSpace(box.Text))
+                box.Text = "(пустой документ)";
+            AttachDocumentBox(box);
+            PreviewLog.Info("ODF preview OK: " + path + " paras=" + paras);
         }
 
         private void ShowDocx(string path)
@@ -181,7 +313,8 @@ namespace WinPreviewPlus
             var box = PreviewUi.CreateDocumentBox();
             var sb = new StringBuilder();
             int blocks = 0;
-            using (var doc = WordprocessingDocument.Open(path, false))
+            using (var fs = PreviewSource.OpenSharedRead(path))
+            using (var doc = WordprocessingDocument.Open(fs, false))
             {
                 var body = doc.MainDocumentPart?.Document?.Body;
                 if (body != null)
@@ -353,7 +486,8 @@ namespace WinPreviewPlus
             _binaryXls = false;
             CreateExcelGrid();
 
-            using (var doc = SpreadsheetDocument.Open(path, false))
+            using (var fs = PreviewSource.OpenSharedRead(path))
+            using (var doc = SpreadsheetDocument.Open(fs, false))
             {
                 var wb = doc.WorkbookPart;
                 _sheets = wb?.Workbook?.Sheets?.Elements<Sheet>()
@@ -372,7 +506,7 @@ namespace WinPreviewPlus
             CreateExcelGrid();
 
             _sheets = new List<SheetInfo>();
-            using (var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var stream = PreviewSource.OpenSharedRead(path))
             using (var reader = ExcelReaderFactory.CreateReader(stream))
             {
                 int i = 0;
@@ -619,7 +753,8 @@ namespace WinPreviewPlus
             excelRowNums = new List<int>();
             maxCol = 0;
 
-            using (var doc = SpreadsheetDocument.Open(_xlsxPath, false))
+            using (var fs = PreviewSource.OpenSharedRead(_xlsxPath))
+            using (var doc = SpreadsheetDocument.Open(fs, false))
             {
                 var wb = doc.WorkbookPart;
                 var shared = wb.SharedStringTablePart?.SharedStringTable;
@@ -666,7 +801,7 @@ namespace WinPreviewPlus
             if (!int.TryParse(sheet.RelId, NumberStyles.Integer, CultureInfo.InvariantCulture, out int target))
                 return;
 
-            using (var stream = File.Open(_xlsxPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var stream = PreviewSource.OpenSharedRead(_xlsxPath))
             using (var reader = ExcelReaderFactory.CreateReader(stream))
             {
                 int idx = 0;
@@ -950,7 +1085,8 @@ namespace WinPreviewPlus
             var box = PreviewUi.CreateDocumentBox();
             var sb = new StringBuilder();
             int n = 0;
-            using (var doc = PresentationDocument.Open(path, false))
+            using (var fs = PreviewSource.OpenSharedRead(path))
+            using (var doc = PresentationDocument.Open(fs, false))
             {
                 var pres = doc.PresentationPart;
                 var ids = pres?.Presentation?.SlideIdList?.Elements<SlideId>().ToList()
@@ -1476,8 +1612,13 @@ namespace WinPreviewPlus
                 _findDebounce = new Timer { Interval = 160 };
                 _findDebounce.Tick += (s, e) =>
                 {
-                    _findDebounce.Stop();
-                    RebuildMatches(resetIndex: true);
+                    try
+                    {
+                        (s as Timer)?.Stop();
+                        if (IsDisposed) return;
+                        RebuildMatches(resetIndex: true);
+                    }
+                    catch (Exception ex) { PreviewLog.Error("Office find debounce", ex); }
                 };
             }
 
@@ -1862,6 +2003,8 @@ namespace WinPreviewPlus
         {
             if (disposing)
             {
+                _live?.Dispose();
+                _live = null;
                 DisposeFindUi();
                 _source?.Dispose();
                 _source = null;

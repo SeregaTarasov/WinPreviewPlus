@@ -1,4 +1,3 @@
-using System;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using SharpShell.Attributes;
@@ -13,62 +12,44 @@ namespace WinPreviewPlus
     [PreviewHandler(DisableLowILProcessIsolation = true)]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".jpg")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".jpeg")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".jpe")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".jfif")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".png")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".gif")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".bmp")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".dib")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".tif")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".tiff")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".webp")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".ico")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".cur")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".svg")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".svgz")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".emf")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".wmf")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".heic")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".heif")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".heics")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".hif")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".avif")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".jxr")]
     [DisplayName("WinPreviewPlus Image")]
-    public class ImagePreviewHandler : SharpPreviewHandler, IInitializeWithFile, IPreviewHandler
+    public class ImagePreviewHandler : FilePreviewHandler, IInitializeWithFile, IPreviewHandler
     {
-        // JPEG/PNG/HEIC; даунскейл больших растров. SVG — через WebView2.
-        private const long MaxBytes = 256L * 1024 * 1024;
-        private string _filePath;
+        protected override long MaxBytes => 256L * 1024 * 1024;
 
-        static ImagePreviewHandler()
-        {
-            PreviewAssemblyResolve.Ensure();
-        }
+        int IInitializeWithFile.Initialize(string pszFilePath, STGM grfMode) =>
+            InitializeFile(pszFilePath);
 
-        int IInitializeWithFile.Initialize(string pszFilePath, STGM grfMode)
-        {
-            PreviewAssemblyResolve.Ensure();
-            _filePath = pszFilePath;
-            PreviewLog.Info("ImagePreviewHandler IInitializeWithFile: " + pszFilePath);
-            return WinError.S_OK;
-        }
-
-        protected override PreviewHandlerControl DoPreview()
-        {
-            PreviewAssemblyResolve.Ensure();
-            var control = new ImagePreviewControl();
-            try
-            {
-                var path = !string.IsNullOrEmpty(_filePath) ? _filePath : SelectedFilePath;
-                var source = PreviewSource.FromFilePath(path, MaxBytes);
-                control.LoadImage(source);
-            }
-            catch (Exception ex)
-            {
-                PreviewLog.Error("ImagePreviewHandler.DoPreview", ex);
-            }
-            return control;
-        }
+        protected override PreviewHandlerControl DoPreview() =>
+            LoadControl<ImagePreviewControl>((c, s) => c.LoadImage(s));
 
         int IPreviewHandler.TranslateAccelerator(MSG pmsg) =>
             PreviewAccel.Translate(this, pmsg, (key, ctrl) =>
             {
                 var img = PreviewAccel.GetControl(this) as ImagePreviewControl;
                 if (img == null) return null;
-                // клавиши зума обрабатывает контрол через кнопки; колесо — MouseWheel
-                return null;
+                return img.TryHandleKey(key, ctrl) ? WinError.S_OK : (int?)null;
             });
     }
 }

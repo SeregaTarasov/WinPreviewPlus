@@ -1,4 +1,3 @@
-using System;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using SharpShell.Attributes;
@@ -21,41 +20,19 @@ namespace WinPreviewPlus
     [COMServerAssociation(AssociationType.ClassOfExtension, ".mpeg")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".mpg")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".3gp")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".ogv")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".3g2")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".asf")]
     [DisplayName("WinPreviewPlus Video")]
-    public class VideoPreviewHandler : SharpPreviewHandler, IInitializeWithFile, IPreviewHandler
+    public class VideoPreviewHandler : FilePreviewHandler, IInitializeWithFile, IPreviewHandler
     {
-        private const long MaxBytes = 8L * 1024 * 1024 * 1024; // 8 GB
-        private string _filePath;
+        protected override long MaxBytes => 8L * 1024 * 1024 * 1024;
 
-        static VideoPreviewHandler()
-        {
-            PreviewAssemblyResolve.Ensure();
-        }
+        int IInitializeWithFile.Initialize(string pszFilePath, STGM grfMode) =>
+            InitializeFile(pszFilePath);
 
-        int IInitializeWithFile.Initialize(string pszFilePath, STGM grfMode)
-        {
-            PreviewAssemblyResolve.Ensure();
-            _filePath = pszFilePath;
-            PreviewLog.Info("VideoPreviewHandler IInitializeWithFile: " + pszFilePath);
-            return WinError.S_OK;
-        }
-
-        protected override PreviewHandlerControl DoPreview()
-        {
-            PreviewAssemblyResolve.Ensure();
-            var control = new VideoPreviewControl();
-            try
-            {
-                var path = !string.IsNullOrEmpty(_filePath) ? _filePath : SelectedFilePath;
-                var source = PreviewSource.FromFilePath(path, MaxBytes);
-                control.LoadVideo(source);
-            }
-            catch (Exception ex)
-            {
-                PreviewLog.Error("VideoPreviewHandler.DoPreview", ex);
-            }
-            return control;
-        }
+        protected override PreviewHandlerControl DoPreview() =>
+            LoadControl<VideoPreviewControl>((c, s) => c.LoadVideo(s));
 
         int IPreviewHandler.TranslateAccelerator(MSG pmsg) =>
             PreviewAccel.Translate(this, pmsg, (key, ctrl) =>
@@ -65,6 +42,11 @@ namespace WinPreviewPlus
                 if (!ctrl && key == Keys.Space)
                 {
                     video.TogglePlayPause();
+                    return WinError.S_OK;
+                }
+                if (!ctrl && (key == Keys.Left || key == Keys.Right))
+                {
+                    video.SeekBySeconds(key == Keys.Right ? 5 : -5);
                     return WinError.S_OK;
                 }
                 return null;

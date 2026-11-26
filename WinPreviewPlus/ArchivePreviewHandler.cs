@@ -1,4 +1,3 @@
-using System;
 using System.Runtime.InteropServices;
 using SharpShell.Attributes;
 using SharpShell.Interop;
@@ -18,44 +17,47 @@ namespace WinPreviewPlus
     [COMServerAssociation(AssociationType.ClassOfExtension, ".gz")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".bz2")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".xz")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".epub")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".jar")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".apk")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".nupkg")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".whl")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".vsix")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".cbz")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".cbr")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".war")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".ear")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".ipa")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".xpi")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".crx")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".appx")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".msix")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".kmz")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".tbz")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".tbz2")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".txz")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".lz")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".cbt")]
     [DisplayName("WinPreviewPlus Archive")]
     // Только File — иначе Explorer выбирает Stream и отдаёт копию без пути
-    public class ArchivePreviewHandler : SharpPreviewHandler, IInitializeWithFile, IPreviewHandler
+    public class ArchivePreviewHandler : FilePreviewHandler, IInitializeWithFile, IPreviewHandler
     {
-        private const long MaxBytes = 512L * 1024 * 1024;
-        private string _filePath;
+        protected override long MaxBytes => 512L * 1024 * 1024;
 
-        static ArchivePreviewHandler()
-        {
-            PreviewAssemblyResolve.Ensure();
-        }
+        int IInitializeWithFile.Initialize(string pszFilePath, STGM grfMode) =>
+            InitializeFile(pszFilePath);
 
-        int IInitializeWithFile.Initialize(string pszFilePath, STGM grfMode)
-        {
-            PreviewAssemblyResolve.Ensure();
-            _filePath = pszFilePath;
-            PreviewLog.Info("ArchivePreviewHandler IInitializeWithFile: " + pszFilePath);
-            return WinError.S_OK;
-        }
-
-        protected override PreviewHandlerControl DoPreview()
-        {
-            PreviewAssemblyResolve.Ensure();
-            var control = new ArchivePreviewControl();
-            try
-            {
-                var path = !string.IsNullOrEmpty(_filePath) ? _filePath : SelectedFilePath;
-                var source = PreviewSource.FromFilePath(path, MaxBytes);
-                control.LoadArchive(source);
-            }
-            catch (Exception ex)
-            {
-                PreviewLog.Error("ArchivePreviewHandler.DoPreview", ex);
-            }
-            return control;
-        }
+        protected override PreviewHandlerControl DoPreview() =>
+            LoadControl<ArchivePreviewControl>((c, s) => c.LoadArchive(s));
 
         int IPreviewHandler.TranslateAccelerator(MSG pmsg) =>
-            PreviewAccel.Translate(this, pmsg);
+            PreviewAccel.Translate(this, pmsg, (key, ctrl) =>
+            {
+                var archive = PreviewAccel.GetControl(this) as ArchivePreviewControl;
+                if (archive == null) return null;
+                if (!ctrl && key == System.Windows.Forms.Keys.Back)
+                    return archive.TryGoUp() ? WinError.S_OK : (int?)null;
+                return null;
+            });
     }
 }

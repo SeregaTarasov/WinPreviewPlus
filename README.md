@@ -6,12 +6,13 @@
 
 | Тип | Примеры |
 |-----|---------|
-| Архивы | zip, 7z, rar, tar, gz… |
-| Office | docx, xlsx, **xls**, pptx |
+| Архивы | zip, 7z, rar, tar, gz, epub, jar, apk, nupkg, cbz, war, ipa, appx… |
+| Office | docx/docm, xlsx/xlsm/xls/xlsb, pptx, odt/ods/odp/odg |
 | PDF | поиск по тексту, масштаб |
-| Текст / код | txt, md, json, xml, ps1, cs… |
-| Фото | jpg, png, webp, heic, **svg**… |
-| Аудио / видео | mp3, flac, mp4, mkv… (видео/SVG — через WebView2) |
+| Текст / код | txt, md, json, xml, ps1, cs, rtf, ipynb…; **Ctrl+W** — перенос строк |
+| Фото | jpg, png, webp, heic, **svg**, svgz, emf, jxr…; **+ / − / 0 / 1** — зум |
+| Аудио / видео | mp3, flac, mp4, mkv, ogv… (видео/SVG — через WebView2); **← / →** — ±5 с |
+| Папки | вход внутрь, открытие файлов; в архиве — то же (**↑** / Backspace) |
 
 Поиск (**Ctrl+F**) в PDF, тексте и таблицах Office — одна панель «Найти».
 

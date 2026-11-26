@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.IO;
 using System.Reflection;
 using System.Windows.Forms;
 
@@ -27,10 +28,62 @@ namespace WinPreviewPlus
         public const int CellPadH = 8;
         public const int CellPadV = 6;
 
-        public static Font FontUi => new Font("Segoe UI", 9f, FontStyle.Regular);
-        public static Font FontTitle => new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
-        public static Font FontMuted => new Font("Segoe UI", 8.25f, FontStyle.Regular);
-        public static Font FontMono => new Font("Consolas", 9f, FontStyle.Regular);
+        // Один экземпляр на процесс: раньше каждый доступ создавал новый GDI-шрифт.
+        private static readonly Font UiFont = new Font("Segoe UI", 9f, FontStyle.Regular);
+        private static readonly Font TitleFont = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
+        private static readonly Font MutedFont = new Font("Segoe UI", 8.25f, FontStyle.Regular);
+        private static readonly Font MonoFont = new Font("Consolas", 9f, FontStyle.Regular);
+        private static readonly Font EditorFont = new Font("Consolas", 10.5f, FontStyle.Regular);
+        private static readonly Font DocumentFont = new Font("Segoe UI", 10.25f, FontStyle.Regular);
+
+        public static Font FontUi => UiFont;
+        public static Font FontTitle => TitleFont;
+        public static Font FontMuted => MutedFont;
+        public static Font FontMono => MonoFont;
+        public static Font FontEditor => EditorFont;
+        public static Font FontDocument => DocumentFont;
+
+        public static string HtmlEncode(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            return s.Replace("&", "&amp;").Replace("\"", "&quot;")
+                    .Replace("<", "&lt;").Replace(">", "&gt;");
+        }
+
+        /// <summary>
+        /// Панель ещё пустая: файл не открылся до отрисовки формата.
+        /// Иначе prevhost показывает белый прямоугольник без текста.
+        /// </summary>
+        public static void ShowLoadFailure(Control host, Exception ex, string logContext)
+        {
+            PreviewLog.Error(logContext, ex);
+            if (host == null || host.IsDisposed) return;
+            try
+            {
+                host.Controls.Clear();
+                host.BackColor = Surface;
+                string text = "Не удалось открыть файл.";
+                if (ex is FileNotFoundException || ex is IOException ||
+                    ex is UnauthorizedAccessException || ex is InvalidOperationException)
+                {
+                    if (!string.IsNullOrWhiteSpace(ex.Message))
+                        text = ex.Message;
+                }
+                host.Controls.Add(new Label
+                {
+                    Dock = DockStyle.Fill,
+                    TextAlign = ContentAlignment.MiddleCenter,
+                    ForeColor = Danger,
+                    Font = FontUi,
+                    Text = text,
+                    Padding = new Padding(16)
+                });
+            }
+            catch (Exception paintEx)
+            {
+                PreviewLog.Error(logContext + " failure UI", paintEx);
+            }
+        }
 
         public static void EnableDoubleBuffer(Control c)
         {
@@ -246,10 +299,20 @@ namespace WinPreviewPlus
                 DetectUrls = false,
                 BackColor = Surface,
                 ForeColor = TextPrimary,
-                Font = new Font("Segoe UI", 10.25f),
+                Font = FontDocument,
                 Padding = new Padding(8),
                 ScrollBars = RichTextBoxScrollBars.Vertical
             };
+        }
+
+        public static string FormatSize(long bytes)
+        {
+            if (bytes < 1024) return bytes + " Б";
+            double kb = bytes / 1024.0;
+            if (kb < 1024) return kb.ToString("0.#") + " КБ";
+            double mb = kb / 1024.0;
+            if (mb < 1024) return mb.ToString("0.##") + " МБ";
+            return (mb / 1024.0).ToString("0.##") + " ГБ";
         }
 
         public static Button CreateSheetTab(string text, bool active)

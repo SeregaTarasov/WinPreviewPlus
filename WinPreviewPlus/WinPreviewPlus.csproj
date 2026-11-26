@@ -16,7 +16,7 @@
     <Product>WinPreviewPlus</Product>
     <Company>WinPreviewPlus</Company>
     <AssemblyTitle>WinPreviewPlus</AssemblyTitle>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <!-- PDB содержат пути сборки (Users\…) — в Release не пишем -->
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
   </PropertyGroup>

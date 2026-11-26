@@ -5,7 +5,7 @@ Open folder in Explorer → select a file → **Alt+P**.
 | Folder | What to try |
 |--------|-------------|
 | 01-text | Ctrl+F → `ПРОБНИК-НАЙТИ-123` |
-| 02-office | docx / xlsx / xls / pptx, Ctrl+F |
+| 02-office | docx / xlsx / xls / pptx, Ctrl+F (также docm, xlsb, odt — если есть файл) |
 | 03-pdf | PDF find `PROBNIK-NAYTI-123` |
 | 04-archive | zip listing |
 | 05-images | png/jpg zoom, svg (WebView2), gif |

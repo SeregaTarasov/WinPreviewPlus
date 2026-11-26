@@ -1,4 +1,3 @@
-using System;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using SharpShell.Attributes;
@@ -22,41 +21,19 @@ namespace WinPreviewPlus
     [COMServerAssociation(AssociationType.ClassOfExtension, ".opus")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".aiff")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".aif")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".oga")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".mpga")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".weba")]
     [DisplayName("WinPreviewPlus Audio")]
-    public class AudioPreviewHandler : SharpPreviewHandler, IInitializeWithFile, IPreviewHandler
+    public class AudioPreviewHandler : FilePreviewHandler, IInitializeWithFile, IPreviewHandler
     {
-        private const long MaxBytes = 512L * 1024 * 1024;
-        private string _filePath;
+        protected override long MaxBytes => 512L * 1024 * 1024;
 
-        static AudioPreviewHandler()
-        {
-            PreviewAssemblyResolve.Ensure();
-        }
+        int IInitializeWithFile.Initialize(string pszFilePath, STGM grfMode) =>
+            InitializeFile(pszFilePath);
 
-        int IInitializeWithFile.Initialize(string pszFilePath, STGM grfMode)
-        {
-            PreviewAssemblyResolve.Ensure();
-            _filePath = pszFilePath;
-            PreviewLog.Info("AudioPreviewHandler IInitializeWithFile: " + pszFilePath);
-            return WinError.S_OK;
-        }
-
-        protected override PreviewHandlerControl DoPreview()
-        {
-            PreviewAssemblyResolve.Ensure();
-            var control = new AudioPreviewControl();
-            try
-            {
-                var path = !string.IsNullOrEmpty(_filePath) ? _filePath : SelectedFilePath;
-                var source = PreviewSource.FromFilePath(path, MaxBytes);
-                control.LoadAudio(source);
-            }
-            catch (Exception ex)
-            {
-                PreviewLog.Error("AudioPreviewHandler.DoPreview", ex);
-            }
-            return control;
-        }
+        protected override PreviewHandlerControl DoPreview() =>
+            LoadControl<AudioPreviewControl>((c, s) => c.LoadAudio(s));
 
         int IPreviewHandler.TranslateAccelerator(MSG pmsg) =>
             PreviewAccel.Translate(this, pmsg, (key, ctrl) =>
@@ -66,6 +43,11 @@ namespace WinPreviewPlus
                 if (!ctrl && key == Keys.Space)
                 {
                     audio.TogglePlayPause();
+                    return WinError.S_OK;
+                }
+                if (!ctrl && (key == Keys.Left || key == Keys.Right))
+                {
+                    audio.SeekBySeconds(key == Keys.Right ? 5 : -5);
                     return WinError.S_OK;
                 }
                 return null;

@@ -80,8 +80,7 @@ namespace WinPreviewPlus
                         !wanted.Any(w => key.StartsWith(w.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase)))
                         continue;
 
-                    var relative = entry.Key.Replace('/', Path.DirectorySeparatorChar);
-                    var target = Path.Combine(destDir, relative);
+                    var target = SafeTarget(destDir, entry.Key);
                     var parent = Path.GetDirectoryName(target);
                     if (!string.IsNullOrEmpty(parent))
                         Directory.CreateDirectory(parent);
@@ -99,8 +98,7 @@ namespace WinPreviewPlus
             {
                 foreach (var entry in archive.Entries.Where(e => e != null && !e.IsDirectory))
                 {
-                    var relative = entry.Key.Replace('/', Path.DirectorySeparatorChar);
-                    var target = Path.Combine(destDir, relative);
+                    var target = SafeTarget(destDir, entry.Key);
                     var parent = Path.GetDirectoryName(target);
                     if (!string.IsNullOrEmpty(parent))
                         Directory.CreateDirectory(parent);
@@ -190,6 +188,8 @@ namespace WinPreviewPlus
                     return null;
 
                 var fileName = Path.GetFileName(entry.Key.Replace('/', '\\'));
+                if (string.IsNullOrEmpty(fileName) || fileName == "." || fileName == "..")
+                    throw new InvalidOperationException("Небезопасное имя в архиве: " + entry.Key);
                 var target = Path.Combine(destDir, fileName);
                 using (var fs = File.Create(target))
                 using (var es = entry.OpenEntryStream())
@@ -202,6 +202,25 @@ namespace WinPreviewPlus
         {
             if (string.IsNullOrEmpty(key)) return "";
             return key.Replace('/', '\\').TrimEnd('\\');
+        }
+
+        /// <summary>Не даёт записи архива выйти из папки назначения (zip-slip).</summary>
+        private static string SafeTarget(string destDir, string entryKey)
+        {
+            if (string.IsNullOrWhiteSpace(entryKey))
+                throw new InvalidOperationException("Пустой путь в архиве.");
+
+            var rel = entryKey.Replace('/', Path.DirectorySeparatorChar);
+            if (rel.IndexOf(':') >= 0 || Path.IsPathRooted(rel))
+                throw new InvalidOperationException("Небезопасный путь в архиве: " + entryKey);
+
+            rel = rel.TrimStart(Path.DirectorySeparatorChar);
+            var root = Path.GetFullPath(destDir)
+                .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var target = Path.GetFullPath(Path.Combine(root, rel));
+            if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Небезопасный путь в архиве: " + entryKey);
+            return target;
         }
     }
 }

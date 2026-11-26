@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Drawing;
 using System.IO;
@@ -12,12 +13,26 @@ namespace WinPreviewPlus
     public class ArchivePreviewControl : PreviewHandlerControl
     {
         private readonly DataGridView _grid;
+        private readonly Panel _nav;
+        private readonly Button _btnUp;
+        private readonly Label _pathLbl;
         private PreviewSource _source;
+        private PreviewLiveSync _live;
         private Point _dragStart;
         private bool _dragPending;
         private bool _dragging;
         private string[] _dragCacheFiles;
         private string _dragCacheKey;
+        private string _cwd = "";
+        private List<RawEntry> _all;
+
+        private sealed class RawEntry
+        {
+            public string Key;
+            public bool IsDir;
+            public long Size;
+            public DateTime? Date;
+        }
 
         public ArchivePreviewControl()
         {
@@ -26,6 +41,41 @@ namespace WinPreviewPlus
             Font = PreviewUi.FontUi;
             PreviewUi.EnableDoubleBuffer(this);
             AllowDrop = false;
+
+            _nav = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 34,
+                BackColor = PreviewUi.HeaderBg,
+                Padding = new Padding(6, 4, 6, 4)
+            };
+            PreviewUi.EnableDoubleBuffer(_nav);
+            _btnUp = new Button
+            {
+                Text = "↑",
+                FlatStyle = FlatStyle.Flat,
+                Font = PreviewUi.FontUi,
+                Width = 32,
+                Height = 26,
+                Dock = DockStyle.Left,
+                Cursor = Cursors.Hand,
+                TabStop = false
+            };
+            _btnUp.FlatAppearance.BorderSize = 0;
+            _btnUp.FlatAppearance.MouseOverBackColor = Color.FromArgb(220, 224, 232);
+            _btnUp.Click += (s, e) => TryGoUp();
+            new ToolTip().SetToolTip(_btnUp, "На уровень выше (Backspace)");
+            _pathLbl = new Label
+            {
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Font = PreviewUi.FontMuted,
+                ForeColor = PreviewUi.TextMuted,
+                AutoEllipsis = true,
+                Padding = new Padding(8, 0, 0, 0)
+            };
+            _nav.Controls.Add(_pathLbl);
+            _nav.Controls.Add(_btnUp);
 
             _grid = new DataGridView { Dock = DockStyle.Fill };
             PreviewUi.StyleGrid(_grid);
@@ -39,7 +89,7 @@ namespace WinPreviewPlus
             _grid.KeyDown += GridOnKeyDown;
             _grid.MouseDown += GridOnMouseDown;
             _grid.MouseMove += GridOnMouseMove;
-            _grid.SelectionChanged += (s, e) => WarmDragCache();
+            _grid.MouseUp += (s, e) => { _dragPending = false; };
 
             var ctx = new ContextMenuStrip();
             ctx.Items.Add("Открыть", null, (s, e) => OpenSelected());
@@ -53,11 +103,26 @@ namespace WinPreviewPlus
             _grid.ContextMenuStrip = ctx;
 
             Controls.Add(_grid);
+            Controls.Add(_nav);
+        }
+
+        public bool TryGoUp()
+        {
+            if (string.IsNullOrEmpty(_cwd)) return false;
+            var trim = _cwd.TrimEnd('\\');
+            int i = trim.LastIndexOf('\\');
+            _cwd = i < 0 ? "" : trim.Substring(0, i + 1);
+            FillGrid();
+            return true;
         }
 
         private void GridOnKeyDown(object sender, KeyEventArgs e)
         {
-            if (e.KeyCode == Keys.Enter) { OpenSelected(); e.Handled = true; }
+            if (e.KeyCode == Keys.Back)
+            {
+                if (TryGoUp()) e.Handled = true;
+            }
+            else if (e.KeyCode == Keys.Enter) { OpenSelected(); e.Handled = true; }
             else if (e.Control && e.KeyCode == Keys.A)
             {
                 _grid.SelectAll();
@@ -81,19 +146,18 @@ namespace WinPreviewPlus
             }
             _dragStart = e.Location;
             _dragPending = true;
-            // заранее готовим файлы, пока тянут мышь
-            WarmDragCache();
         }
 
         private void GridOnMouseMove(object sender, MouseEventArgs e)
         {
             if (!_dragPending || _dragging || e.Button != MouseButtons.Left) return;
-            if (Math.Abs(e.X - _dragStart.X) < SystemInformation.DragSize.Width &&
-                Math.Abs(e.Y - _dragStart.Y) < SystemInformation.DragSize.Height)
+            int dx = Math.Abs(e.X - _dragStart.X);
+            int dy = Math.Abs(e.Y - _dragStart.Y);
+            if (dx < SystemInformation.DragSize.Width * 2 &&
+                dy < SystemInformation.DragSize.Height * 2)
                 return;
 
             _dragPending = false;
-            // DoDragDrop нельзя из глубины MouseMove DGV — откладываем
             BeginInvoke(new Action(() => BeginFileDragOrCopy(copyOnly: false)));
         }
 
@@ -103,40 +167,15 @@ namespace WinPreviewPlus
             return _source.Path + "|" + string.Join("\n", keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase));
         }
 
-        private void WarmDragCache()
-        {
-            if (_source == null || _dragging) return;
-            var keys = SelectedKeys(true);
-            if (keys.Length == 0) return;
-            var key = SelectionCacheKey(keys);
-            if (key == null || key == _dragCacheKey) return;
-            try
-            {
-                var files = ArchiveActions.ExtractForDragDrop(_source.Path, keys);
-                if (files != null && files.Length > 0 && files.All(File.Exists))
-                {
-                    _dragCacheFiles = files;
-                    _dragCacheKey = key;
-                    PreviewLog.Info("Drag cache ready: " + files.Length);
-                }
-            }
-            catch (Exception ex)
-            {
-                PreviewLog.Error("WarmDragCache failed", ex);
-            }
-        }
-
-        /// <summary>
-        /// FileDrop в Explorer / буфер — как несколько ярлыков с рабочего стола.
-        /// </summary>
         private void BeginFileDragOrCopy(bool copyOnly)
         {
             if (_source == null || _dragging) return;
             var keys = SelectedKeys(true);
             if (keys.Length == 0)
             {
-                MessageBox.Show("Выберите один или несколько файлов (не папки).", "Архив",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                if (copyOnly)
+                    MessageBox.Show("Выберите один или несколько файлов (не папки).", "Архив",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -201,48 +240,146 @@ namespace WinPreviewPlus
         public void LoadArchive(PreviewSource source)
         {
             _source = source;
-            _grid.Rows.Clear();
-            _grid.SuspendLayout();
+            BindLive();
+            ReadEntries();
+            if (!string.IsNullOrEmpty(_cwd) && !CwdStillExists())
+                _cwd = "";
+            FillGrid();
+        }
 
+        private void BindLive()
+        {
+            _live?.Dispose();
+            _live = PreviewLiveSync.ForSource(
+                this,
+                () => _source,
+                () =>
+                {
+                    ReadEntries();
+                    if (!CwdStillExists()) _cwd = "";
+                    FillGrid();
+                },
+                () => ResizeColumns());
+        }
+
+        private bool CwdStillExists()
+        {
+            if (string.IsNullOrEmpty(_cwd) || _all == null) return true;
+            return _all.Any(e =>
+                e.Key.StartsWith(_cwd, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private void ReadEntries()
+        {
+            _all = new List<RawEntry>();
+            if (_source == null || string.IsNullOrEmpty(_source.Path)) return;
             try
             {
-                using (var archive = ArchiveFactory.Open(source.Path))
+                using (var archive = ArchiveFactory.Open(_source.Path))
                 {
-                    var entries = archive.Entries
-                        .Where(e => e != null && !string.IsNullOrEmpty(e.Key))
-                        .OrderBy(e => e.IsDirectory ? 0 : 1)
-                        .ThenBy(e => e.Key, StringComparer.OrdinalIgnoreCase)
-                        .Take(5000)
-                        .ToList();
-
-                    foreach (var entry in entries)
+                    foreach (var e in archive.Entries)
                     {
-                        var name = entry.Key.Replace('/', '\\');
-                        if (entry.IsDirectory && !name.EndsWith("\\", StringComparison.Ordinal))
-                            name += "\\";
-
-                        string sizeText = entry.IsDirectory ? "—" : FormatSize(entry.Size);
-                        string dateText = entry.LastModifiedTime.HasValue
-                            ? entry.LastModifiedTime.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
-                            : "—";
-
-                        int idx = _grid.Rows.Add(name, sizeText, dateText);
-                        var row = _grid.Rows[idx];
-                        row.Tag = name;
-                        if (entry.IsDirectory)
-                            row.DefaultCellStyle.ForeColor = PreviewUi.Folder;
+                        if (e == null || string.IsNullOrEmpty(e.Key)) continue;
+                        var key = e.Key.Replace('/', '\\');
+                        bool dir = e.IsDirectory || key.EndsWith("\\", StringComparison.Ordinal);
+                        if (dir && !key.EndsWith("\\", StringComparison.Ordinal))
+                            key += "\\";
+                        _all.Add(new RawEntry
+                        {
+                            Key = key,
+                            IsDir = dir,
+                            Size = dir ? 0 : e.Size,
+                            Date = e.LastModifiedTime
+                        });
                     }
-
-                    ResizeColumns();
-                    PreviewLog.Info("Archive preview OK: " + source.Path + " count=" + entries.Count);
                 }
+                PreviewLog.Info("Archive index: " + _source.Path + " count=" + _all.Count);
             }
             catch (Exception ex)
             {
+                PreviewLog.Error("Archive index failed: " + _source.Path, ex);
+                _all = null;
                 _grid.Rows.Clear();
                 int idx = _grid.Rows.Add("Ошибка: " + ex.Message, "", "");
                 _grid.Rows[idx].DefaultCellStyle.ForeColor = PreviewUi.Danger;
-                PreviewLog.Error("Archive preview failed: " + source.Path, ex);
+            }
+        }
+
+        private void FillGrid()
+        {
+            if (_all == null) return;
+            _grid.Rows.Clear();
+            _grid.SuspendLayout();
+            try
+            {
+                var cwd = _cwd ?? "";
+                if (!string.IsNullOrEmpty(cwd) && !cwd.EndsWith("\\", StringComparison.Ordinal))
+                    cwd += "\\";
+
+                _pathLbl.Text = string.IsNullOrEmpty(cwd)
+                    ? (_source?.DisplayName ?? "Архив")
+                    : (_source?.DisplayName ?? "Архив") + " \\ " + cwd.TrimEnd('\\');
+                _btnUp.Enabled = !string.IsNullOrEmpty(cwd);
+
+                if (!string.IsNullOrEmpty(cwd))
+                {
+                    int up = _grid.Rows.Add("..", "—", "—");
+                    _grid.Rows[up].Tag = "..";
+                    _grid.Rows[up].DefaultCellStyle.ForeColor = PreviewUi.Folder;
+                }
+
+                var folders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var files = new List<RawEntry>();
+
+                foreach (var e in _all)
+                {
+                    if (!e.Key.StartsWith(cwd, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    var rel = e.Key.Substring(cwd.Length);
+                    if (string.IsNullOrEmpty(rel)) continue;
+                    int slash = rel.IndexOf('\\');
+                    if (slash >= 0)
+                    {
+                        var name = rel.Substring(0, slash);
+                        if (name.Length == 0) continue;
+                        var full = cwd + name + "\\";
+                        if (!folders.ContainsKey(name))
+                            folders[name] = full;
+                    }
+                    else if (e.IsDir)
+                    {
+                        var name = rel.TrimEnd('\\');
+                        if (name.Length == 0) continue;
+                        folders[name] = e.Key.EndsWith("\\") ? e.Key : e.Key + "\\";
+                    }
+                    else
+                        files.Add(e);
+                }
+
+                foreach (var kv in folders.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    int idx = _grid.Rows.Add(kv.Key + "\\", "—", "—");
+                    _grid.Rows[idx].Tag = kv.Value;
+                    _grid.Rows[idx].DefaultCellStyle.ForeColor = PreviewUi.Folder;
+                }
+
+                foreach (var e in files.OrderBy(f => Path.GetFileName(f.Key), StringComparer.OrdinalIgnoreCase).Take(4000))
+                {
+                    string dateText = e.Date.HasValue
+                        ? e.Date.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                        : "—";
+                    int idx = _grid.Rows.Add(Path.GetFileName(e.Key), PreviewUi.FormatSize(e.Size), dateText);
+                    _grid.Rows[idx].Tag = e.Key;
+                }
+
+                if (_grid.Rows.Count == 0 || (_grid.Rows.Count == 1 && Equals(_grid.Rows[0].Tag, "..")))
+                {
+                    int empty = _grid.Rows.Add(string.IsNullOrEmpty(cwd) ? "Архив пуст" : "Папка пуста", "", "");
+                    _grid.Rows[empty].Tag = null;
+                    _grid.Rows[empty].DefaultCellStyle.ForeColor = PreviewUi.TextMuted;
+                }
+
+                ResizeColumns();
             }
             finally
             {
@@ -255,21 +392,28 @@ namespace WinPreviewPlus
             return _grid.SelectedRows.Cast<DataGridViewRow>()
                 .Where(r => !r.IsNewRow)
                 .Select(r => r.Tag as string)
-                .Where(s => !string.IsNullOrEmpty(s) && (!filesOnly || !s.EndsWith("\\")))
+                .Where(s => !string.IsNullOrEmpty(s) && s != ".." && (!filesOnly || !s.EndsWith("\\")))
                 .ToArray();
         }
 
         private void OpenSelected()
         {
             if (_source == null) return;
-            var keys = SelectedKeys(true);
-            if (keys.Length != 1)
+            var row = _grid.CurrentRow ?? (_grid.SelectedRows.Count > 0 ? _grid.SelectedRows[0] : null);
+            var tag = row?.Tag as string;
+            if (string.IsNullOrEmpty(tag)) return;
+            if (tag == "..")
             {
-                MessageBox.Show("Выберите один файл в списке.", "Архив",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                TryGoUp();
                 return;
             }
-            ArchiveActions.OpenEntry(_source.Path, keys[0]);
+            if (tag.EndsWith("\\", StringComparison.Ordinal))
+            {
+                _cwd = tag;
+                FillGrid();
+                return;
+            }
+            ArchiveActions.OpenEntry(_source.Path, tag);
         }
 
         private void ExtractSelected()
@@ -278,7 +422,7 @@ namespace WinPreviewPlus
             var keys = _grid.SelectedRows.Cast<DataGridViewRow>()
                 .Where(r => !r.IsNewRow)
                 .Select(r => r.Tag as string)
-                .Where(s => !string.IsNullOrEmpty(s))
+                .Where(s => !string.IsNullOrEmpty(s) && s != "..")
                 .ToArray();
             if (keys.Length == 0)
             {
@@ -361,7 +505,6 @@ namespace WinPreviewPlus
 
         private void ResizeColumns()
         {
-            // Имя/Размер по содержимому; Дата — до правого края панели
             PreviewUi.FitColumnsContentThenFillLast(_grid);
         }
 
@@ -369,20 +512,33 @@ namespace WinPreviewPlus
         {
             if (disposing)
             {
+                _live?.Dispose();
+                _live = null;
+                DeleteDragCache();
                 _source?.Dispose();
                 _source = null;
             }
             base.Dispose(disposing);
         }
 
-        private static string FormatSize(long bytes)
+        private void DeleteDragCache()
         {
-            if (bytes < 1024) return bytes + " Б";
-            double kb = bytes / 1024.0;
-            if (kb < 1024) return kb.ToString("0.#") + " КБ";
-            double mb = kb / 1024.0;
-            if (mb < 1024) return mb.ToString("0.##") + " МБ";
-            return (mb / 1024.0).ToString("0.##") + " ГБ";
+            var files = _dragCacheFiles;
+            _dragCacheFiles = null;
+            _dragCacheKey = null;
+            if (files == null || files.Length == 0) return;
+            try
+            {
+                var dir = Path.GetDirectoryName(files[0]);
+                var marker = Path.Combine("WinPreviewPlus", "drag");
+                if (!string.IsNullOrEmpty(dir) &&
+                    dir.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0)
+                    Directory.Delete(dir, true);
+            }
+            catch (Exception ex)
+            {
+                PreviewLog.Error("Drag cache cleanup", ex);
+            }
         }
     }
 }

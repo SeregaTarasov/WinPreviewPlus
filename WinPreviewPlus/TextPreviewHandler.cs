@@ -1,4 +1,3 @@
-using System;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using SharpShell.Attributes;
@@ -27,40 +26,15 @@ namespace WinPreviewPlus
     [COMServerAssociation(AssociationType.ClassOfExtension, ".yaml")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".editorconfig")]
     [DisplayName("WinPreviewPlus Text")]
-    public class TextPreviewHandler : SharpPreviewHandler, IInitializeWithFile, IPreviewHandler
+    public class TextPreviewHandler : FilePreviewHandler, IInitializeWithFile, IPreviewHandler
     {
-        private const long MaxBytes = 32L * 1024 * 1024;
-        private string _filePath;
+        protected override long MaxBytes => 32L * 1024 * 1024;
 
-        static TextPreviewHandler()
-        {
-            PreviewAssemblyResolve.Ensure();
-        }
+        int IInitializeWithFile.Initialize(string pszFilePath, STGM grfMode) =>
+            InitializeFile(pszFilePath);
 
-        int IInitializeWithFile.Initialize(string pszFilePath, STGM grfMode)
-        {
-            PreviewAssemblyResolve.Ensure();
-            _filePath = pszFilePath;
-            PreviewLog.Info("TextPreviewHandler IInitializeWithFile: " + pszFilePath);
-            return WinError.S_OK;
-        }
-
-        protected override PreviewHandlerControl DoPreview()
-        {
-            PreviewAssemblyResolve.Ensure();
-            var control = new TextPreviewControl();
-            try
-            {
-                var path = !string.IsNullOrEmpty(_filePath) ? _filePath : SelectedFilePath;
-                var source = PreviewSource.FromFilePath(path, MaxBytes);
-                control.LoadText(source);
-            }
-            catch (Exception ex)
-            {
-                PreviewLog.Error("TextPreviewHandler.DoPreview", ex);
-            }
-            return control;
-        }
+        protected override PreviewHandlerControl DoPreview() =>
+            LoadControl<TextPreviewControl>((c, s) => c.LoadText(s));
 
         int IPreviewHandler.TranslateAccelerator(MSG pmsg)
         {
@@ -78,6 +52,11 @@ namespace WinPreviewPlus
                 {
                     if (text.TrySelectAllFromHost())
                         return WinError.S_OK;
+                }
+                if (ctrl && key == Keys.W)
+                {
+                    text.ToggleWordWrapFromHost();
+                    return WinError.S_OK;
                 }
                 return null;
             });

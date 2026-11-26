@@ -33,6 +33,7 @@ namespace WinPreviewPlus
         private RichTextBox _textBox;
         private PdfDocument _doc;
         private PreviewSource _source;
+        private PreviewLiveSync _live;
         private bool _textMode;
 
         private string _findQuery = "";
@@ -226,6 +227,17 @@ namespace WinPreviewPlus
                 ShowError("Не удалось открыть PDF: " + ex.Message);
                 PreviewLog.Error("PDF preview failed: " + source.Path, ex);
             }
+            BindLive();
+        }
+
+        private void BindLive()
+        {
+            _live?.Dispose();
+            _live = PreviewLiveSync.ForSource(
+                this,
+                () => _source,
+                () => { if (_source != null) LoadPdf(_source); },
+                () => RefreshBar());
         }
 
         /// <summary>
@@ -322,8 +334,13 @@ namespace WinPreviewPlus
                 _findDebounce = new Timer { Interval = 180 };
                 _findDebounce.Tick += (s, e) =>
                 {
-                    _findDebounce.Stop();
-                    RunFind(forward: true, allowStep: false);
+                    try
+                    {
+                        (s as Timer)?.Stop();
+                        if (IsDisposed) return;
+                        RunFind(forward: true, allowStep: false);
+                    }
+                    catch (Exception ex) { PreviewLog.Error("PDF find debounce", ex); }
                 };
             }
 
@@ -331,6 +348,7 @@ namespace WinPreviewPlus
             _findBar.BoxKeyDown += FindBoxOnKeyDown;
             _findBar.BoxTextChanged += (s, e) =>
             {
+                if (_findDebounce == null || IsDisposed) return;
                 _findDebounce.Stop();
                 _findDebounce.Start();
             };
@@ -1000,6 +1018,8 @@ namespace WinPreviewPlus
         {
             if (disposing)
             {
+                _live?.Dispose();
+                _live = null;
                 DisposeViewer();
                 _hotkeys?.Dispose();
                 _hotkeys = null;

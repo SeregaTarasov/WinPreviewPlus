@@ -1,4 +1,3 @@
-using System;
 using System.Runtime.InteropServices;
 using SharpShell.Attributes;
 using SharpShell.Interop;
@@ -12,40 +11,15 @@ namespace WinPreviewPlus
     [PreviewHandler(DisableLowILProcessIsolation = true)]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".pdf")]
     [DisplayName("WinPreviewPlus PDF")]
-    public class PdfPreviewHandler : SharpPreviewHandler, IInitializeWithFile, IPreviewHandler
+    public class PdfPreviewHandler : FilePreviewHandler, IInitializeWithFile, IPreviewHandler
     {
-        private const long MaxBytes = 256L * 1024 * 1024;
-        private string _filePath;
+        protected override long MaxBytes => 256L * 1024 * 1024;
 
-        static PdfPreviewHandler()
-        {
-            PreviewAssemblyResolve.Ensure();
-        }
+        int IInitializeWithFile.Initialize(string pszFilePath, STGM grfMode) =>
+            InitializeFile(pszFilePath);
 
-        int IInitializeWithFile.Initialize(string pszFilePath, STGM grfMode)
-        {
-            PreviewAssemblyResolve.Ensure();
-            _filePath = pszFilePath;
-            PreviewLog.Info("PdfPreviewHandler IInitializeWithFile: " + pszFilePath);
-            return WinError.S_OK;
-        }
-
-        protected override PreviewHandlerControl DoPreview()
-        {
-            PreviewAssemblyResolve.Ensure();
-            var control = new PdfPreviewControl();
-            try
-            {
-                var path = !string.IsNullOrEmpty(_filePath) ? _filePath : SelectedFilePath;
-                var source = PreviewSource.FromFilePath(path, MaxBytes);
-                control.LoadPdf(source);
-            }
-            catch (Exception ex)
-            {
-                PreviewLog.Error("PdfPreviewHandler.DoPreview", ex);
-            }
-            return control;
-        }
+        protected override PreviewHandlerControl DoPreview() =>
+            LoadControl<PdfPreviewControl>((c, s) => c.LoadPdf(s));
 
         int IPreviewHandler.TranslateAccelerator(MSG pmsg) =>
             PreviewAccel.Translate(this, pmsg);

@@ -5,6 +5,7 @@ namespace WinPreviewPlus
 {
     internal static class PreviewLog
     {
+        private const long MaxLogBytes = 1024 * 1024;
         private static readonly object Gate = new object();
         private static readonly string Dir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -28,13 +29,25 @@ namespace WinPreviewPlus
                 var line = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + " [" + level + "] " + message + Environment.NewLine;
                 lock (Gate)
                 {
-                    File.AppendAllText(Path.Combine(Dir, "preview.log"), line);
+                    var path = Path.Combine(Dir, "preview.log");
+                    RotateIfNeeded(path);
+                    File.AppendAllText(path, line);
                 }
             }
             catch
             {
                 // never throw from logger inside prevhost
             }
+        }
+
+        private static void RotateIfNeeded(string path)
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists || info.Length < MaxLogBytes) return;
+            var bak = path + ".1";
+            if (File.Exists(bak))
+                File.Delete(bak);
+            File.Move(path, bak);
         }
     }
 }

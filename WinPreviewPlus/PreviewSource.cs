@@ -8,8 +8,8 @@ using SharpShell.SharpPreviewHandler;
 namespace WinPreviewPlus
 {
     /// <summary>
-    /// Путь к файлу для превью. Предпочитаем оригинал с диска;
-    /// temp из IStream — только если пути нет (редко).
+    /// Путь к файлу для превью. Оригинал не держим открытым: снимок в temp
+    /// (до SnapshotLimit), чтобы Проводник мог удалить выбранный файл.
     /// </summary>
     public sealed class PreviewSource : IDisposable
     {
@@ -18,6 +18,20 @@ namespace WinPreviewPlus
         public string OriginalPath { get; private set; }
         public string DisplayName { get; private set; }
         public bool IsTemp { get; private set; }
+
+        /// <summary>
+        /// Снимок до этого размера: Pdfium/WebView2/OpenXml открывают по пути
+        /// без FILE_SHARE_DELETE и блокируют удаление в Проводнике.
+        /// </summary>
+        // Маленький снимок: DoPreview идёт синхронно из Проводника — копия 100+ МБ
+        // подвешивает explorer.exe (иконка на панели откликается со 2–3 раза).
+        public const long SnapshotLimit = 8L * 1024 * 1024;
+
+        public static FileStream OpenSharedRead(string path)
+        {
+            return new FileStream(path, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete, 64 * 1024, FileOptions.SequentialScan);
+        }
 
         /// <summary>Открыть оригинальный файл по пути (предпочтительно).</summary>
         public static PreviewSource FromFilePath(string filePath, long maxBytes)
@@ -35,12 +49,22 @@ namespace WinPreviewPlus
                 if (!CanOpenSharedRead(filePath))
                     throw new IOException("Файл занят или недоступен для чтения: " + filePath);
 
-                TryClearMotw(filePath);
-                src.Path = filePath;
                 src.OriginalPath = filePath;
                 src.DisplayName = info.Name;
-                src.IsTemp = false;
-                PreviewLog.Info("Using ORIGINAL file: " + src.Path);
+
+                if (info.Length <= SnapshotLimit)
+                {
+                    src.Path = SnapshotToTemp(filePath, info.Extension);
+                    src.IsTemp = true;
+                    TryClearMotw(src.Path);
+                    PreviewLog.Info("Using SNAPSHOT: " + src.Path + " of " + filePath);
+                }
+                else
+                {
+                    src.Path = filePath;
+                    src.IsTemp = false;
+                    PreviewLog.Info("Using ORIGINAL (too large to snapshot): " + src.Path);
+                }
                 return src;
             }
             catch (Exception ex)
@@ -49,6 +73,21 @@ namespace WinPreviewPlus
                 PreviewLog.Error("PreviewSource.FromFilePath failed", ex);
                 throw;
             }
+        }
+
+        private static string SnapshotToTemp(string filePath, string extension)
+        {
+            var tempDir = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "WinPreviewPlus", "tmp");
+            Directory.CreateDirectory(tempDir);
+            if (string.IsNullOrEmpty(extension))
+                extension = ".bin";
+            var dest = System.IO.Path.Combine(tempDir, Guid.NewGuid().ToString("N") + extension);
+            using (var input = OpenSharedRead(filePath))
+            using (var output = new FileStream(dest, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+                input.CopyTo(output);
+            return dest;
         }
 
         public static PreviewSource FromHandler(
@@ -96,11 +135,8 @@ namespace WinPreviewPlus
         {
             try
             {
-                using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read,
-                    FileShare.ReadWrite | FileShare.Delete))
-                {
+                using (var fs = OpenSharedRead(path))
                     return fs.CanRead;
-                }
             }
             catch
             {
@@ -184,7 +220,7 @@ namespace WinPreviewPlus
         {
             try
             {
-                using (var fs = File.OpenRead(path))
+                using (var fs = OpenSharedRead(path))
                 {
                     if (fs.Length < 4) return null;
                     var sig = new byte[4];
@@ -240,19 +276,64 @@ namespace WinPreviewPlus
             }
         }
 
+        /// <summary>
+        /// Переснимает temp с оригинала (файл сохранили в другой программе).
+        /// False — оригинал пропал.
+        /// </summary>
+        public bool RefreshFromOriginal()
+        {
+            var orig = OriginalPath;
+            if (string.IsNullOrEmpty(orig))
+                return false;
+            if (!File.Exists(orig))
+                return false;
+
+            try
+            {
+                if (!CanOpenSharedRead(orig))
+                    return true;
+
+                var info = new FileInfo(orig);
+                if (info.Length <= SnapshotLimit)
+                {
+                    var next = SnapshotToTemp(orig, info.Extension);
+                    var old = Path;
+                    Path = next;
+                    IsTemp = true;
+                    TryClearMotw(next);
+                    if (!string.IsNullOrEmpty(old) &&
+                        !string.Equals(old, next, StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(old, orig, StringComparison.OrdinalIgnoreCase))
+                        TryDeleteFile(old);
+                }
+                else
+                {
+                    if (IsTemp)
+                        TryDeleteFile(Path);
+                    Path = orig;
+                    IsTemp = false;
+                }
+                DisplayName = info.Name;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                PreviewLog.Error("RefreshFromOriginal failed: " + orig, ex);
+                return File.Exists(orig);
+            }
+        }
+
+        private static void TryDeleteFile(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return;
+            try { if (File.Exists(path)) File.Delete(path); } catch { }
+        }
+
         public void Dispose()
         {
             if (!IsTemp || string.IsNullOrEmpty(Path))
                 return;
-            try
-            {
-                if (File.Exists(Path))
-                    File.Delete(Path);
-            }
-            catch
-            {
-                // ignore
-            }
+            TryDeleteFile(Path);
             Path = null;
             IsTemp = false;
         }

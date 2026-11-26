@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
+using System.IO.Compression;
 using System.Text;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
@@ -32,6 +33,7 @@ namespace WinPreviewPlus
         private Button _btnZoomIn;
 
         private PreviewSource _source;
+        private PreviewLiveSync _live;
         private Image _image;
         private int _naturalW;
         private int _naturalH;
@@ -39,6 +41,9 @@ namespace WinPreviewPlus
         private bool _svgMode;
         private WebView2 _web;
         private bool _webReady;
+        private string _svgInflated;
+        private string _svgServePath;
+        private string _errorText;
 
         private float _zoom = 1f;
         private float _ox;
@@ -69,26 +74,10 @@ namespace WinPreviewPlus
             _btnZoomIn = MakeBtn("+");
             _btnFit = MakeBtn("⌂");
             _btn100 = MakeBtn("1:1");
-            _btnZoomOut.Click += (s, e) =>
-            {
-                if (_svgMode) SvgCmd("zoomBy", 1f / 1.2f);
-                else ZoomBy(1f / 1.2f, null);
-            };
-            _btnZoomIn.Click += (s, e) =>
-            {
-                if (_svgMode) SvgCmd("zoomBy", 1.2f);
-                else ZoomBy(1.2f, null);
-            };
-            _btnFit.Click += (s, e) =>
-            {
-                if (_svgMode) SvgCmd("fit", 0);
-                else FitToWindow();
-            };
-            _btn100.Click += (s, e) =>
-            {
-                if (_svgMode) SvgCmd("zoomAbs", 1f);
-                else ZoomAbsolute(1f, null);
-            };
+            _btnZoomOut.Click += (s, e) => ZoomStep(false);
+            _btnZoomIn.Click += (s, e) => ZoomStep(true);
+            _btnFit.Click += (s, e) => FitNow();
+            _btn100.Click += (s, e) => ActualNow();
 
             _zoomLbl = new Label
             {
@@ -109,10 +98,10 @@ namespace WinPreviewPlus
             };
 
             var tip = new ToolTip();
-            tip.SetToolTip(_btnZoomOut, "Уменьшить (Ctrl+колёсико)");
-            tip.SetToolTip(_btnZoomIn, "Увеличить (Ctrl+колёсико)");
-            tip.SetToolTip(_btnFit, "Вписать в окно");
-            tip.SetToolTip(_btn100, "100%");
+            tip.SetToolTip(_btnZoomOut, "Уменьшить (− / Ctrl+колёсико)");
+            tip.SetToolTip(_btnZoomIn, "Увеличить (+ / Ctrl+колёсико)");
+            tip.SetToolTip(_btnFit, "Вписать в окно (0)");
+            tip.SetToolTip(_btn100, "100% (1)");
 
             _bar.Controls.Add(_btnZoomOut);
             _bar.Controls.Add(_btnZoomIn);
@@ -153,6 +142,50 @@ namespace WinPreviewPlus
             LayoutBar();
         }
 
+        public bool TryHandleKey(Keys key, bool ctrl)
+        {
+            if (key == Keys.Oemplus || key == Keys.Add)
+            {
+                ZoomStep(true);
+                return true;
+            }
+            if (key == Keys.OemMinus || key == Keys.Subtract)
+            {
+                ZoomStep(false);
+                return true;
+            }
+            if (!ctrl && (key == Keys.D0 || key == Keys.NumPad0))
+            {
+                FitNow();
+                return true;
+            }
+            if (!ctrl && (key == Keys.D1 || key == Keys.NumPad1))
+            {
+                ActualNow();
+                return true;
+            }
+            return false;
+        }
+
+        private void ZoomStep(bool zoomIn)
+        {
+            float f = zoomIn ? 1.2f : 1f / 1.2f;
+            if (_svgMode) SvgCmd("zoomBy", f);
+            else ZoomBy(f, null);
+        }
+
+        private void FitNow()
+        {
+            if (_svgMode) SvgCmd("fit", 0);
+            else FitToWindow();
+        }
+
+        private void ActualNow()
+        {
+            if (_svgMode) SvgCmd("zoomAbs", 1f);
+            else ZoomAbsolute(1f, null);
+        }
+
         public void LoadImage(PreviewSource source)
         {
             DisposeImage();
@@ -160,12 +193,14 @@ namespace WinPreviewPlus
             _source = source;
             _svgMode = false;
             _webReady = false;
+            _errorText = null;
             _canvas.Visible = true;
 
             string ext = (Path.GetExtension(source?.Path) ?? "").ToLowerInvariant();
             if (ext == ".svg" || ext == ".svgz")
             {
                 LoadSvg(source);
+                BindLive();
                 return;
             }
 
@@ -186,11 +221,33 @@ namespace WinPreviewPlus
             {
                 string hint = "";
                 if (ext == ".heic" || ext == ".heif" || ext == ".heics" || ext == ".avif")
-                    hint = " Установите «Расширения для изображений HEIF / AV1» из Microsoft Store.";
-                _meta.Text = "Не удалось открыть" + (string.IsNullOrEmpty(hint) ? "" : " — кодек?");
-                PreviewLog.Error("Image preview failed: " + source?.Path + hint, ex);
+                    hint = "\nУстановите «Расширения для изображений HEIF / AV1» из Microsoft Store.";
+                else if (ext == ".webp")
+                    hint = "\nСистемный кодек WebP не открыл файл.";
+                _errorText = "Не удалось открыть изображение." + hint;
+                _meta.Text = "Не удалось открыть";
+                PreviewLog.Error("Image preview failed: " + source?.Path, ex);
                 _canvas.Invalidate();
             }
+            LayoutBar();
+            BindLive();
+        }
+
+        private void BindLive()
+        {
+            _live?.Dispose();
+            _live = PreviewLiveSync.ForSource(
+                this,
+                () => _source,
+                () => { if (_source != null) LoadImage(_source); },
+                RelayoutDisplay);
+        }
+
+        public void RelayoutDisplay()
+        {
+            if (_svgMode) SvgCmd("fit", 0);
+            else if (_fitMode) FitToWindow();
+            else _canvas?.Invalidate();
             LayoutBar();
         }
 
@@ -199,7 +256,28 @@ namespace WinPreviewPlus
             _svgMode = true;
             _canvas.Visible = false;
             string name = source.DisplayName ?? Path.GetFileName(source.Path) ?? "SVG";
-            _meta.Text = name + " · SVG";
+            _svgServePath = source.Path;
+            bool compressed = (Path.GetExtension(source.Path) ?? "")
+                .Equals(".svgz", StringComparison.OrdinalIgnoreCase);
+            if (compressed)
+            {
+                try
+                {
+                    _svgServePath = InflateSvgz(source.Path);
+                    _svgInflated = _svgServePath;
+                }
+                catch (Exception ex)
+                {
+                    _svgMode = false;
+                    _canvas.Visible = true;
+                    _errorText = "SVGZ не распаковался.";
+                    _meta.Text = "Не удалось открыть";
+                    PreviewLog.Error("SVGZ inflate failed: " + source.Path, ex);
+                    _canvas.Invalidate();
+                    return;
+                }
+            }
+            _meta.Text = name + (compressed ? " · SVGZ" : " · SVG");
             _zoomLbl.Text = "—";
             LayoutBar();
 
@@ -255,7 +333,7 @@ namespace WinPreviewPlus
                 // Ctrl+колёсико зума страницы Edge — включаем + свой JS pan
                 core.Settings.AreBrowserAcceleratorKeysEnabled = true;
 
-                var path = _source.Path;
+                var path = string.IsNullOrEmpty(_svgServePath) ? _source.Path : _svgServePath;
                 var folder = Path.GetDirectoryName(path);
                 var fileName = Path.GetFileName(path);
                 core.SetVirtualHostNameToFolderMapping(
@@ -315,8 +393,7 @@ namespace WinPreviewPlus
         private static string HtmlEnc(string s)
         {
             if (string.IsNullOrEmpty(s)) return "";
-            return s.Replace("&", "&amp;").Replace("\"", "&quot;")
-                    .Replace("<", "&lt;").Replace(">", "&gt;");
+            return PreviewUi.HtmlEncode(s);
         }
 
         private void SvgCmd(string name, float arg)
@@ -511,7 +588,17 @@ namespace WinPreviewPlus
         {
             var g = e.Graphics;
             g.Clear(_canvas.BackColor);
-            if (_image == null) return;
+            if (_image == null)
+            {
+                if (!string.IsNullOrEmpty(_errorText))
+                {
+                    var flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                                TextFormatFlags.WordBreak;
+                    TextRenderer.DrawText(g, _errorText, PreviewUi.FontUi, _canvas.ClientRectangle,
+                        Color.FromArgb(230, 210, 210), flags);
+                }
+                return;
+            }
             var dest = new RectangleF(_ox, _oy, _image.Width * _zoom, _image.Height * _zoom);
             if (_zoom >= 3f)
             {
@@ -582,30 +669,69 @@ namespace WinPreviewPlus
             }
         }
 
+        private static string InflateSvgz(string path)
+        {
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "WinPreviewPlus", "tmp");
+            Directory.CreateDirectory(dir);
+            var dest = Path.Combine(dir, Guid.NewGuid().ToString("N") + ".svg");
+            using (var input = PreviewSource.OpenSharedRead(path))
+            using (var gz = new GZipStream(input, CompressionMode.Decompress))
+            using (var output = File.Create(dest))
+            {
+                gz.CopyTo(output);
+            }
+            return dest;
+        }
+
         private void DisposeWeb()
         {
             _webReady = false;
-            if (_web == null) return;
-            try
+            if (_web != null)
             {
-                _web.CoreWebView2InitializationCompleted -= SvgOnInitCompleted;
-                _view.Controls.Remove(_web);
-                _web.Dispose();
+                try
+                {
+                    _web.CoreWebView2InitializationCompleted -= SvgOnInitCompleted;
+                    _view.Controls.Remove(_web);
+                    _web.Dispose();
+                }
+                catch { }
+                _web = null;
             }
-            catch { }
-            _web = null;
+            if (!string.IsNullOrEmpty(_svgInflated))
+            {
+                try
+                {
+                    if (File.Exists(_svgInflated))
+                        File.Delete(_svgInflated);
+                }
+                catch { }
+                _svgInflated = null;
+            }
         }
 
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
+                _live?.Dispose();
+                _live = null;
                 DisposeWeb();
                 DisposeImage();
                 _source?.Dispose();
                 _source = null;
             }
             base.Dispose(disposing);
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            var key = keyData & Keys.KeyCode;
+            bool ctrl = (keyData & Keys.Control) == Keys.Control;
+            if (TryHandleKey(key, ctrl))
+                return true;
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         private sealed class ZoomCanvas : Panel

@@ -18,6 +18,7 @@ namespace WinPreviewPlus
         private Timer _tick;
 
         private PreviewSource _source;
+        private PreviewLiveSync _live;
         private WaveStream _reader;
         private IWavePlayer _player;
         private bool _playing;
@@ -156,9 +157,25 @@ namespace WinPreviewPlus
             catch (Exception ex)
             {
                 _btnPlay.Enabled = false;
-                _time.Text = "Не удалось открыть";
+                string detail = ex.Message ?? "";
+                if (detail.Length > 90)
+                    detail = detail.Substring(0, 90) + "…";
+                _time.Text = string.IsNullOrWhiteSpace(detail)
+                    ? "Не удалось открыть"
+                    : "Не удалось открыть: " + detail;
                 PreviewLog.Error("Audio open failed: " + source.Path, ex);
             }
+            BindLive();
+        }
+
+        private void BindLive()
+        {
+            _live?.Dispose();
+            _live = PreviewLiveSync.ForSource(
+                this,
+                () => _source,
+                () => { if (_source != null) LoadAudio(_source); },
+                () => LayoutCard());
         }
 
         private static WaveStream OpenStream(string path)
@@ -167,7 +184,8 @@ namespace WinPreviewPlus
             Exception last = null;
 
             if (ext == ".m4r" || ext == ".m4a" || ext == ".aac" || ext == ".wma" ||
-                ext == ".flac" || ext == ".mp4")
+                ext == ".flac" || ext == ".mp4" || ext == ".oga" || ext == ".ogg" ||
+                ext == ".opus" || ext == ".mpga" || ext == ".weba")
             {
                 try { return new MediaFoundationReader(path); }
                 catch (Exception ex) { last = ex; }
@@ -197,6 +215,25 @@ namespace WinPreviewPlus
                 throw new InvalidOperationException(
                     "Формат не поддерживается или нет кодека. " + (ex.Message ?? last?.Message),
                     ex);
+            }
+        }
+
+        public void SeekBySeconds(int seconds)
+        {
+            if (_reader == null) return;
+            try
+            {
+                var t = _reader.CurrentTime + TimeSpan.FromSeconds(seconds);
+                if (t < TimeSpan.Zero) t = TimeSpan.Zero;
+                var total = _reader.TotalTime;
+                if (t > total) t = total;
+                _reader.CurrentTime = t;
+                UpdateProgress();
+                RefreshTimeLabel(fromBar: false);
+            }
+            catch (Exception ex)
+            {
+                PreviewLog.Error("Audio SeekBySeconds", ex);
             }
         }
 
@@ -360,6 +397,8 @@ namespace WinPreviewPlus
         {
             if (disposing)
             {
+                _live?.Dispose();
+                _live = null;
                 DisposePlayer();
                 if (_tick != null)
                 {
@@ -380,6 +419,16 @@ namespace WinPreviewPlus
             if (keyData == Keys.Space)
             {
                 TogglePlayPause();
+                return true;
+            }
+            if (keyData == Keys.Left)
+            {
+                SeekBySeconds(-5);
+                return true;
+            }
+            if (keyData == Keys.Right)
+            {
+                SeekBySeconds(5);
                 return true;
             }
             return base.ProcessCmdKey(ref msg, keyData);

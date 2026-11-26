@@ -11,8 +11,6 @@ namespace WinPreviewPlus
     {
         private const int WmKeyDown = 0x0100;
         private const int WmSysKeyDown = 0x0104;
-        private const int GaRoot = 2;
-
         private readonly Control _root;
         private readonly Action _onFind;
         private readonly Action<bool> _onFindNext;
@@ -43,7 +41,6 @@ namespace WinPreviewPlus
             if (_installed) return;
             Application.AddMessageFilter(this);
             _installed = true;
-            PreviewLog.Info("PreviewHotkeys installed");
         }
 
         private void Uninstall()
@@ -65,7 +62,6 @@ namespace WinPreviewPlus
 
             if (ctrl && key == Keys.F && _onFind != null)
             {
-                PreviewLog.Info("Hotkey Ctrl+F");
                 _onFind.Invoke();
                 return true;
             }
@@ -99,16 +95,7 @@ namespace WinPreviewPlus
                 if (focus != IntPtr.Zero && (focus == _root.Handle || IsChild(_root.Handle, focus)))
                     return true;
 
-                // Фокус в том же top-level окне, что и наш превью (prevhost frame)
-                if (_root.Visible && focus != IntPtr.Zero)
-                {
-                    IntPtr ourRoot = GetAncestor(_root.Handle, GaRoot);
-                    IntPtr focusRoot = GetAncestor(focus, GaRoot);
-                    if (ourRoot != IntPtr.Zero && ourRoot == focusRoot)
-                        return true;
-                }
-
-                return _root.ContainsFocus;
+                return false;
             }
             catch
             {
@@ -121,9 +108,6 @@ namespace WinPreviewPlus
 
         [DllImport("user32.dll")]
         private static extern bool IsChild(IntPtr hWndParent, IntPtr hWnd);
-
-        [DllImport("user32.dll")]
-        private static extern IntPtr GetAncestor(IntPtr hwnd, int gaFlags);
 
         public void Dispose() => Uninstall();
     }

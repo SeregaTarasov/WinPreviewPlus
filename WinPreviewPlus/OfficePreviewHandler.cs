@@ -1,4 +1,3 @@
-using System;
 using System.Runtime.InteropServices;
 using SharpShell.Attributes;
 using SharpShell.Interop;
@@ -11,44 +10,36 @@ namespace WinPreviewPlus
     [ClassInterface(ClassInterfaceType.None)]
     [PreviewHandler(DisableLowILProcessIsolation = true)]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".docx")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".docm")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".dotx")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".dotm")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".xlsx")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".xlsm")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".xltx")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".xltm")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".xls")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".xlsb")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".xlt")]
     [COMServerAssociation(AssociationType.ClassOfExtension, ".pptx")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".pptm")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".potx")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".potm")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".ppsx")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".ppsm")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".odt")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".ods")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".odp")]
+    [COMServerAssociation(AssociationType.ClassOfExtension, ".odg")]
     [DisplayName("WinPreviewPlus Office")]
-    public class OfficePreviewHandler : SharpPreviewHandler, IInitializeWithFile, IPreviewHandler
+    public class OfficePreviewHandler : FilePreviewHandler, IInitializeWithFile, IPreviewHandler
     {
-        private const long MaxBytes = 128L * 1024 * 1024;
-        private string _filePath;
+        protected override long MaxBytes => 128L * 1024 * 1024;
 
-        static OfficePreviewHandler()
-        {
-            PreviewAssemblyResolve.Ensure();
-        }
+        int IInitializeWithFile.Initialize(string pszFilePath, STGM grfMode) =>
+            InitializeFile(pszFilePath);
 
-        int IInitializeWithFile.Initialize(string pszFilePath, STGM grfMode)
-        {
-            PreviewAssemblyResolve.Ensure();
-            _filePath = pszFilePath;
-            PreviewLog.Info("OfficePreviewHandler IInitializeWithFile: " + pszFilePath);
-            return WinError.S_OK;
-        }
-
-        protected override PreviewHandlerControl DoPreview()
-        {
-            PreviewAssemblyResolve.Ensure();
-            var control = new OfficePreviewControl();
-            try
-            {
-                var path = !string.IsNullOrEmpty(_filePath) ? _filePath : SelectedFilePath;
-                var source = PreviewSource.FromFilePath(path, MaxBytes);
-                control.LoadOffice(source);
-            }
-            catch (Exception ex)
-            {
-                PreviewLog.Error("OfficePreviewHandler.DoPreview", ex);
-            }
-            return control;
-        }
+        protected override PreviewHandlerControl DoPreview() =>
+            LoadControl<OfficePreviewControl>((c, s) => c.LoadOffice(s));
 
         int IPreviewHandler.TranslateAccelerator(MSG pmsg) =>
             PreviewAccel.Translate(this, pmsg, (key, ctrl) =>
@@ -56,7 +47,6 @@ namespace WinPreviewPlus
                 var office = PreviewAccel.GetControl(this) as OfficePreviewControl;
                 if (office == null) return null;
 
-                // Ctrl+F / F3 — явно (иначе Проводник глотает до ProcessCmdKey)
                 if (ctrl && key == System.Windows.Forms.Keys.F)
                 {
                     office.ShowFind();

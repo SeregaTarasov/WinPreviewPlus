@@ -72,6 +72,7 @@ $txt = '{B7E4A904-2C5D-4F8A-9E31-11A0C3D5E704}'
 $aud = '{B7E4A905-2C5D-4F8A-9E31-11A0C3D5E705}'
 $vid = '{B7E4A906-2C5D-4F8A-9E31-11A0C3D5E706}'
 $img = '{B7E4A907-2C5D-4F8A-9E31-11A0C3D5E707}'
+$dir = '{B7E4A908-2C5D-4F8A-9E31-11A0C3D5E708}'
 
 $progMap = @{
   'Applications\7zFM.exe' = $arch
@@ -90,12 +91,24 @@ foreach ($kv in $progMap.GetEnumerator()) {
   Write-Host "ProgId $($kv.Key) -> $($kv.Value)"
 }
 
+# Держать в синхроне с WinPreviewPlus\PreviewCatalog.cs
 $extMap = @{
   '.zip' = $arch; '.7z' = $arch; '.rar' = $arch; '.tar' = $arch
   '.tgz' = $arch; '.gz' = $arch; '.bz2' = $arch; '.xz' = $arch
-  '.docx' = $off; '.xlsx' = $off; '.xls' = $off; '.pptx' = $off
+  '.epub' = $arch; '.jar' = $arch; '.apk' = $arch; '.nupkg' = $arch
+  '.whl' = $arch; '.vsix' = $arch; '.cbz' = $arch; '.cbr' = $arch
+  '.war' = $arch; '.ear' = $arch; '.ipa' = $arch; '.xpi' = $arch
+  '.crx' = $arch; '.appx' = $arch; '.msix' = $arch; '.kmz' = $arch
+  '.tbz' = $arch; '.tbz2' = $arch; '.txz' = $arch; '.lz' = $arch; '.cbt' = $arch
+  '.docx' = $off; '.docm' = $off; '.dotx' = $off; '.dotm' = $off
+  '.xlsx' = $off; '.xlsm' = $off; '.xltx' = $off; '.xltm' = $off
+  '.xls' = $off; '.xlsb' = $off; '.xlt' = $off
+  '.pptx' = $off; '.pptm' = $off; '.potx' = $off; '.potm' = $off
+  '.ppsx' = $off; '.ppsm' = $off
+  '.odt' = $off; '.ods' = $off; '.odp' = $off; '.odg' = $off
   '.pdf' = $pdf
-  '.txt' = $txt; '.log' = $txt; '.md' = $txt; '.csv' = $txt; '.tsv' = $txt
+  '.txt' = $txt; '.log' = $txt; '.md' = $txt; '.markdown' = $txt; '.mdown' = $txt
+  '.mdx' = $txt; '.mdc' = $txt; '.csv' = $txt; '.tsv' = $txt
   '.json' = $txt; '.geojson' = $txt; '.jsonl' = $txt; '.ndjson' = $txt
   '.xml' = $txt; '.plist' = $txt; '.mobileconfig' = $txt; '.entitlements' = $txt
   '.strings' = $txt; '.xcconfig' = $txt; '.pbxproj' = $txt; '.podspec' = $txt
@@ -108,13 +121,28 @@ $extMap = @{
   '.html' = $txt; '.htm' = $txt; '.css' = $txt; '.scss' = $txt; '.less' = $txt
   '.editorconfig' = $txt; '.gpx' = $txt; '.kml' = $txt; '.graphql' = $txt
   '.properties' = $txt; '.gradle' = $txt; '.gitignore' = $txt; '.dockerignore' = $txt
+  '.rtf' = $txt; '.csproj' = $txt; '.sln' = $txt; '.vbproj' = $txt; '.vb' = $txt
+  '.fs' = $txt; '.java' = $txt; '.kt' = $txt; '.lua' = $txt; '.psm1' = $txt
+  '.psd1' = $txt; '.vue' = $txt; '.srt' = $txt; '.vtt' = $txt; '.ics' = $txt
+  '.diff' = $txt; '.patch' = $txt; '.proto' = $txt; '.dart' = $txt; '.jsonc' = $txt
+  '.resx' = $txt; '.config' = $txt; '.nuspec' = $txt; '.cshtml' = $txt
+  '.razor' = $txt; '.adoc' = $txt; '.reg' = $txt; '.ipynb' = $txt
+  '.tf' = $txt; '.hcl' = $txt; '.cmake' = $txt; '.mk' = $txt; '.asm' = $txt
+  '.svelte' = $txt; '.zig' = $txt; '.ex' = $txt; '.exs' = $txt
+  '.wsdl' = $txt; '.xsd' = $txt; '.xsl' = $txt; '.xslt' = $txt; '.ps1xml' = $txt
+  '.lock' = $txt; '.npmrc' = $txt; '.map' = $txt; '.http' = $txt
+  '.rst' = $txt; '.org' = $txt; '.tex' = $txt; '.bib' = $txt
+  '.fodt' = $txt; '.fods' = $txt; '.fodp' = $txt
   '.mp3' = $aud; '.wav' = $aud; '.flac' = $aud; '.m4a' = $aud; '.m4r' = $aud; '.aac' = $aud
   '.wma' = $aud; '.ogg' = $aud; '.opus' = $aud; '.aiff' = $aud; '.aif' = $aud
+  '.oga' = $aud; '.mpga' = $aud; '.weba' = $aud
   '.mp4' = $vid; '.m4v' = $vid; '.mov' = $vid; '.avi' = $vid; '.wmv' = $vid
   '.mkv' = $vid; '.webm' = $vid; '.mpeg' = $vid; '.mpg' = $vid; '.3gp' = $vid
-  '.jpg' = $img; '.jpeg' = $img; '.jfif' = $img; '.png' = $img; '.gif' = $img
-  '.bmp' = $img; '.tif' = $img; '.tiff' = $img; '.webp' = $img; '.ico' = $img
-  '.svg' = $img; '.heic' = $img; '.heif' = $img; '.heics' = $img; '.avif' = $img
+  '.ogv' = $vid; '.3g2' = $vid; '.asf' = $vid
+  '.jpg' = $img; '.jpeg' = $img; '.jpe' = $img; '.jfif' = $img; '.png' = $img; '.gif' = $img
+  '.bmp' = $img; '.dib' = $img; '.tif' = $img; '.tiff' = $img; '.webp' = $img; '.ico' = $img
+  '.cur' = $img; '.svg' = $img; '.svgz' = $img; '.emf' = $img; '.wmf' = $img
+  '.heic' = $img; '.heif' = $img; '.heics' = $img; '.hif' = $img; '.avif' = $img; '.jxr' = $img
 }
 foreach ($kv in $extMap.GetEnumerator()) {
   foreach ($base in @(
@@ -126,6 +154,16 @@ foreach ($kv in $extMap.GetEnumerator()) {
   }
 }
 
+foreach ($cls in @('Directory', 'Folder')) {
+  foreach ($base in @(
+    "HKCU:\Software\Classes\$cls\shellex\$PreviewGuid",
+    "HKCU:\Software\Classes\SystemFileAssociations\$cls\shellex\$PreviewGuid"
+  )) {
+    New-Item -Path $base -Force | Out-Null
+    Set-ItemProperty -Path $base -Name '(default)' -Value $dir
+  }
+}
+
 foreach ($pair in @(
   @{ Id = $arch; Name = 'WinPreviewPlus Archive' },
   @{ Id = $off; Name = 'WinPreviewPlus Office' },
@@ -133,7 +171,8 @@ foreach ($pair in @(
   @{ Id = $txt; Name = 'WinPreviewPlus Text' },
   @{ Id = $aud; Name = 'WinPreviewPlus Audio' },
   @{ Id = $vid; Name = 'WinPreviewPlus Video' },
-  @{ Id = $img; Name = 'WinPreviewPlus Image' }
+  @{ Id = $img; Name = 'WinPreviewPlus Image' },
+  @{ Id = $dir; Name = 'WinPreviewPlus Folder' }
 )) {
   foreach ($root in @(
     "HKCU:\Software\Classes\CLSID\$($pair.Id)",
@@ -175,7 +214,7 @@ try { [Win32.ShellNotify]::SHChangeNotify(0x08000000, 0, [IntPtr]::Zero, [IntPtr
 
 Stop-Process -Name prevhost -Force -ErrorAction SilentlyContinue
 
-foreach ($id in @($arch.Trim('{}'), $off.Trim('{}'), $pdf.Trim('{}'), $txt.Trim('{}'), $aud.Trim('{}'), $vid.Trim('{}'), $img.Trim('{}'))) {
+foreach ($id in @($arch.Trim('{}'), $off.Trim('{}'), $pdf.Trim('{}'), $txt.Trim('{}'), $aud.Trim('{}'), $vid.Trim('{}'), $img.Trim('{}'), $dir.Trim('{}'))) {
   try {
     $o = [Activator]::CreateInstance([Type]::GetTypeFromCLSID([guid]$id))
     Write-Host "CoCreate {$id} OK $($o.GetType().Name)"
@@ -192,7 +231,7 @@ Start-Process explorer.exe
 
 Write-Host @"
 
-Installed. Alt+P: archives, Office, PDF, text, audio, video
+Installed. Alt+P: archives, folders, Office, PDF, text, audio, video
 Audio: .mp3 .wav .flac .m4a .m4r …  Video: .mp4 .mkv .avi .mov .wmv …
 Space = play/pause. Explorer restarted.
 Log: $env:LOCALAPPDATA\WinPreviewPlus\preview.log

@@ -20,6 +20,7 @@ namespace WinPreviewPlus
         private WebView2 _web;
         private Label _status;
         private PreviewSource _source;
+        private PreviewLiveSync _live;
         private string _mappedFolder;
         private bool _ready;
 
@@ -82,6 +83,7 @@ namespace WinPreviewPlus
                 ShowError("Не удалось открыть видео:\n" + ex.Message);
                 PreviewLog.Error("Video LoadVideo failed: " + source?.Path, ex);
             }
+            BindLive();
         }
 
         private void WebOnInitCompleted(object sender, CoreWebView2InitializationCompletedEventArgs e)
@@ -126,6 +128,16 @@ namespace WinPreviewPlus
             }
         }
 
+        private void BindLive()
+        {
+            _live?.Dispose();
+            _live = PreviewLiveSync.ForSource(
+                this,
+                () => _source,
+                () => { if (_source != null) LoadVideo(_source); },
+                () => { try { _web?.Invalidate(); } catch { } });
+        }
+
         private static string BuildPlayerHtml(string videoSrc, string title)
         {
             var sb = new StringBuilder();
@@ -140,8 +152,10 @@ namespace WinPreviewPlus
             sb.Append("'></video>");
             sb.Append("<script>");
             sb.Append("document.addEventListener('keydown',function(e){");
-            sb.Append("if(e.code==='Space'){e.preventDefault();var v=document.getElementById('v');");
-            sb.Append("if(v.paused)v.play();else v.pause();}");
+            sb.Append("var v=document.getElementById('v');if(!v)return;");
+            sb.Append("if(e.code==='Space'){e.preventDefault();if(v.paused)v.play();else v.pause();}");
+            sb.Append("if(e.code==='ArrowLeft'){e.preventDefault();v.currentTime=Math.max(0,(v.currentTime||0)-5);}");
+            sb.Append("if(e.code==='ArrowRight'){e.preventDefault();v.currentTime=Math.min(v.duration||0,(v.currentTime||0)+5);}");
             sb.Append("});");
             sb.Append("</script></body></html>");
             return sb.ToString();
@@ -150,8 +164,7 @@ namespace WinPreviewPlus
         private static string HtmlEncode(string s)
         {
             if (string.IsNullOrEmpty(s)) return "";
-            return s.Replace("&", "&amp;").Replace("\"", "&quot;")
-                    .Replace("<", "&lt;").Replace(">", "&gt;");
+            return PreviewUi.HtmlEncode(s);
         }
 
         public void TogglePlayPause()
@@ -166,6 +179,23 @@ namespace WinPreviewPlus
             catch (Exception ex)
             {
                 PreviewLog.Error("Video TogglePlayPause", ex);
+            }
+        }
+
+        public void SeekBySeconds(int seconds)
+        {
+            if (!_ready || _web?.CoreWebView2 == null) return;
+            try
+            {
+                string n = seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                _ = _web.CoreWebView2.ExecuteScriptAsync(
+                    "(function(){var v=document.getElementById('v');if(!v)return;" +
+                    "var t=(v.currentTime||0)+(" + n + ");" +
+                    "v.currentTime=Math.max(0,Math.min(v.duration||0,t));})()");
+            }
+            catch (Exception ex)
+            {
+                PreviewLog.Error("Video SeekBySeconds", ex);
             }
         }
 
@@ -221,6 +251,8 @@ namespace WinPreviewPlus
         {
             if (disposing)
             {
+                _live?.Dispose();
+                _live = null;
                 DisposeWeb();
                 if (_source != null)
                 {
@@ -236,6 +268,16 @@ namespace WinPreviewPlus
             if (keyData == Keys.Space)
             {
                 TogglePlayPause();
+                return true;
+            }
+            if (keyData == Keys.Left)
+            {
+                SeekBySeconds(-5);
+                return true;
+            }
+            if (keyData == Keys.Right)
+            {
+                SeekBySeconds(5);
                 return true;
             }
             return base.ProcessCmdKey(ref msg, keyData);

@@ -10,6 +10,8 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32;
 
+using WinPreviewPlus;
+
 namespace WinPreviewPlus.Setup
 {
     /// <summary>
@@ -19,7 +21,7 @@ namespace WinPreviewPlus.Setup
     internal static class Installer
     {
         public const string ProductName = "WinPreviewPlus";
-        public const string Version = "1.1.0";
+        public const string Version = "1.2.0";
 
         public static readonly string InstallRoot = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -27,20 +29,18 @@ namespace WinPreviewPlus.Setup
         public static readonly string BinDir = Path.Combine(InstallRoot, "bin");
         public static readonly string SetupCopyPath = Path.Combine(InstallRoot, "WinPreviewPlus-Setup.exe");
 
-        private const string PreviewGuid = "{8895b1c6-b41f-4c1c-a562-0d564250836f}";
-        private const string PrevHostAppId = "{6d2b5079-2f0b-48dd-ab7f-97cec514d30b}";
-        private const string Arch = "{B7E4A901-2C5D-4F8A-9E31-11A0C3D5E701}";
-        private const string Off = "{B7E4A902-2C5D-4F8A-9E31-11A0C3D5E702}";
-        private const string Pdf = "{B7E4A903-2C5D-4F8A-9E31-11A0C3D5E703}";
-        private const string Txt = "{B7E4A904-2C5D-4F8A-9E31-11A0C3D5E704}";
-        private const string Aud = "{B7E4A905-2C5D-4F8A-9E31-11A0C3D5E705}";
-        private const string Vid = "{B7E4A906-2C5D-4F8A-9E31-11A0C3D5E706}";
-        private const string Img = "{B7E4A907-2C5D-4F8A-9E31-11A0C3D5E707}";
+        private const string PreviewGuid = PreviewCatalog.PreviewHandlerCategory;
+        private const string PrevHostAppId = PreviewCatalog.PrevHostAppId;
+        private const string Arch = PreviewCatalog.Arch;
+        private const string Off = PreviewCatalog.Off;
+        private const string Pdf = PreviewCatalog.Pdf;
+        private const string Txt = PreviewCatalog.Txt;
+        private const string Aud = PreviewCatalog.Aud;
+        private const string Vid = PreviewCatalog.Vid;
+        private const string Img = PreviewCatalog.Img;
+        private const string Dir = PreviewCatalog.Dir;
 
-        private static readonly string[] HandlerIds =
-        {
-            Arch, Off, Pdf, Txt, Aud, Vid, Img
-        };
+        private static readonly string[] HandlerIds = PreviewCatalog.HandlerIds;
 
         public static Action<string> Log = _ => { };
 
@@ -667,44 +667,7 @@ namespace WinPreviewPlus.Setup
             catch { }
         }
 
-        private static Dictionary<string, string> BuildExtMap()
-        {
-            var extMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var e in new[] { ".zip", ".7z", ".rar", ".tar", ".tgz", ".gz", ".bz2", ".xz" })
-                extMap[e] = Arch;
-            foreach (var e in new[] { ".docx", ".xlsx", ".xls", ".pptx" })
-                extMap[e] = Off;
-            extMap[".pdf"] = Pdf;
-            foreach (var e in new[]
-            {
-                ".txt", ".log", ".md", ".csv", ".tsv", ".json", ".geojson", ".jsonl", ".ndjson",
-                ".xml", ".plist", ".mobileconfig", ".entitlements", ".strings", ".xcconfig",
-                ".pbxproj", ".podspec", ".ini", ".cfg", ".conf", ".toml", ".env",
-                ".yml", ".yaml", ".ps1", ".bat", ".cmd", ".cs", ".js", ".ts", ".tsx", ".jsx",
-                ".py", ".sql", ".swift", ".m", ".mm", ".h", ".hpp", ".c", ".cpp", ".rs", ".go",
-                ".rb", ".php", ".sh", ".bash", ".zsh", ".html", ".htm", ".css", ".scss", ".less",
-                ".editorconfig", ".gpx", ".kml", ".graphql", ".properties", ".gradle",
-                ".gitignore", ".dockerignore"
-            })
-                extMap[e] = Txt;
-            foreach (var e in new[]
-            {
-                ".mp3", ".wav", ".flac", ".m4a", ".m4r", ".aac", ".wma", ".ogg", ".opus", ".aiff", ".aif"
-            })
-                extMap[e] = Aud;
-            foreach (var e in new[]
-            {
-                ".mp4", ".m4v", ".mov", ".avi", ".wmv", ".mkv", ".webm", ".mpeg", ".mpg", ".3gp"
-            })
-                extMap[e] = Vid;
-            foreach (var e in new[]
-            {
-                ".jpg", ".jpeg", ".jfif", ".png", ".gif", ".bmp", ".tif", ".tiff", ".webp", ".ico",
-                ".svg", ".heic", ".heif", ".heics", ".avif"
-            })
-                extMap[e] = Img;
-            return extMap;
-        }
+        private static Dictionary<string, string> BuildExtMap() => PreviewCatalog.BuildExtMap();
 
         private static void WriteAssociations()
         {
@@ -716,7 +679,8 @@ namespace WinPreviewPlus.Setup
                 [Txt] = "WinPreviewPlus Text",
                 [Aud] = "WinPreviewPlus Audio",
                 [Vid] = "WinPreviewPlus Video",
-                [Img] = "WinPreviewPlus Image"
+                [Img] = "WinPreviewPlus Image",
+                [Dir] = "WinPreviewPlus Folder"
             };
 
             var extMap = BuildExtMap();
@@ -740,6 +704,12 @@ namespace WinPreviewPlus.Setup
             {
                 SetShellex(@"Software\Classes\" + kv.Key + @"\shellex\" + PreviewGuid, kv.Value);
                 SetShellex(@"Software\Classes\SystemFileAssociations\" + kv.Key + @"\shellex\" + PreviewGuid, kv.Value);
+            }
+
+            foreach (var cls in PreviewCatalog.DirectoryClasses)
+            {
+                SetShellex(@"Software\Classes\" + cls + @"\shellex\" + PreviewGuid, Dir);
+                SetShellex(@"Software\Classes\SystemFileAssociations\" + cls + @"\shellex\" + PreviewGuid, Dir);
             }
 
             foreach (var p in pairs)
@@ -771,6 +741,13 @@ namespace WinPreviewPlus.Setup
                     @"Software\Classes\SystemFileAssociations\" + ext + @"\shellex\" + PreviewGuid, our);
             }
 
+            foreach (var cls in PreviewCatalog.DirectoryClasses)
+            {
+                RemoveOurShellex(@"Software\Classes\" + cls + @"\shellex\" + PreviewGuid, our);
+                RemoveOurShellex(
+                    @"Software\Classes\SystemFileAssociations\" + cls + @"\shellex\" + PreviewGuid, our);
+            }
+
             foreach (var prog in new[]
             {
                 @"Software\Classes\Applications\7zFM.exe\shellex\" + PreviewGuid,
@@ -778,7 +755,9 @@ namespace WinPreviewPlus.Setup
                 @"Software\Classes\ASC.Document.12\shellex\" + PreviewGuid,
                 @"Software\Classes\ASC.Presentation.12\shellex\" + PreviewGuid,
                 @"Software\Classes\ASC.Sheet.1\shellex\" + PreviewGuid,
-                @"Software\Classes\ASC.Document.1\shellex\" + PreviewGuid
+                @"Software\Classes\ASC.Document.1\shellex\" + PreviewGuid,
+                @"Software\Classes\Excel.Sheet.8\shellex\" + PreviewGuid,
+                @"Software\Classes\Excel.Sheet.12\shellex\" + PreviewGuid
             })
             {
                 RemoveOurShellex(prog, our);
